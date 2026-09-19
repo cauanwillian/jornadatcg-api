@@ -1,0 +1,536 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ======================================================
+// ENUMS
+// ======================================================
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PREPARING
+  READY_TO_SHIP
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  DEBIT_CARD
+  BOLETO
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  ACCUMULATING
+  PENDING
+  PREPARING
+  READY_TO_SHIP
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PROCESSING
+  AUTHORIZED
+  REJECTED
+  CANCELLED
+}
+
+// ======================================================
+// CATÁLOGO
+// ======================================================
+
+model CardSet {
+  id           String    @id @default(uuid()) @db.Uuid
+  externalId   String    @unique
+  name         String
+  series       String?
+  code         String?
+  printedTotal Int?
+  total        Int?
+  releaseDate  DateTime? @db.Date
+  logoUrl      String?
+  symbolUrl    String?
+
+  cards Card[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@map("card_sets")
+}
+
+model Card {
+  id         String @id @default(uuid()) @db.Uuid
+  externalId String @unique
+
+  name   String
+  number String
+
+  rarity String?
+  artist String?
+
+  imageSmall String?
+  imageLarge String?
+
+  metadata Json?
+
+  setId String  @db.Uuid
+  set   CardSet @relation(fields: [setId], references: [id], onDelete: Restrict)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([setId, number])
+  @@index([name])
+  @@index([number])
+  @@index([setId])
+  @@map("cards")
+}
+
+model Category {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  active      Boolean @default(true)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
+}
+
+model Condition {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  code        String  @unique
+  description String?
+  active      Boolean @default(true)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("conditions")
+}
+
+model Language {
+  id     String  @id @default(uuid()) @db.Uuid
+  name   String
+  code   String  @unique
+  active Boolean @default(true)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("languages")
+}
+
+model Product {
+  id String @id @default(uuid()) @db.Uuid
+
+  cardId String @db.Uuid
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Restrict)
+
+  conditionId String    @db.Uuid
+  condition   Condition @relation(fields: [conditionId], references: [id], onDelete: Restrict)
+
+  languageId String   @db.Uuid
+  language   Language @relation(fields: [languageId], references: [id], onDelete: Restrict)
+
+  categoryId String   @db.Uuid
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  price       Decimal @db.Decimal(12, 2)
+  observation String? @db.Text
+  active      Boolean @default(true)
+
+  inventory Inventory?
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cardId])
+  @@index([conditionId])
+  @@index([languageId])
+  @@index([categoryId])
+  @@index([active])
+  @@map("products")
+}
+
+model Inventory {
+  id String @id @default(uuid()) @db.Uuid
+
+  productId String  @unique @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  availableQuantity Int @default(0)
+  reservedQuantity  Int @default(0)
+  soldQuantity      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("inventories")
+}
+
+// ======================================================
+// USUÁRIOS
+// ======================================================
+
+model User {
+  id String @id @default(uuid()) @db.Uuid
+
+  name         String
+  email        String @unique
+  passwordHash String
+
+  cpf   String? @unique @db.VarChar(11)
+  phone String? @db.VarChar(20)
+
+  role UserRole @default(CUSTOMER)
+
+  addresses Address[]
+  cart      Cart?
+  orders    Order[]
+  shipments Shipment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@map("users")
+}
+
+model Address {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label         String?
+  recipientName String
+
+  zipCode      String  @db.VarChar(8)
+  street       String
+  number       String
+  complement   String?
+  neighborhood String
+  city         String
+  state        String  @db.VarChar(2)
+
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ======================================================
+// CARRINHO
+// ======================================================
+
+model Cart {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  items CartItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  cartId String @db.Uuid
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  quantity Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+// ======================================================
+// PEDIDOS
+// ======================================================
+
+model Order {
+  id          String @id @default(uuid()) @db.Uuid
+  orderNumber Int    @unique @default(autoincrement())
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  subtotal       Decimal @db.Decimal(12, 2)
+  shippingAmount Decimal @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal @default(0) @db.Decimal(12, 2)
+  total          Decimal @db.Decimal(12, 2)
+
+  shippingMethod  String?
+  shippingAddress Json?
+
+  items    OrderItem[]
+  payments Payment[]
+  invoice  Invoice?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  paidAt      DateTime?
+  cancelledAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @db.Uuid
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String?  @db.Uuid
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Snapshot da compra
+  cardName      String
+  cardNumber    String
+  setName       String
+  conditionName String
+  languageName  String
+  categoryName  String?
+
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(12, 2)
+  totalPrice Decimal @db.Decimal(12, 2)
+
+  shipmentItems ShipmentItem[]
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ======================================================
+// PAGAMENTOS
+// ======================================================
+
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @db.Uuid
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  provider          String
+  providerPaymentId String? @unique
+
+  method PaymentMethod
+  status PaymentStatus @default(PENDING)
+
+  amount       Decimal @db.Decimal(12, 2)
+  installments Int     @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  paidAt    DateTime?
+  failedAt  DateTime?
+  expiresAt DateTime?
+
+  @@index([orderId])
+  @@index([status])
+  @@map("payments")
+}
+
+// ======================================================
+// FRETE
+// ======================================================
+
+model ShippingBox {
+  id String @id @default(uuid()) @db.Uuid
+
+  name String @unique
+
+  minItems Int
+  maxItems Int
+
+  lengthCm Decimal @db.Decimal(8, 2)
+  widthCm  Decimal @db.Decimal(8, 2)
+  heightCm Decimal @db.Decimal(8, 2)
+
+  weightGrams Int
+
+  active Boolean @default(true)
+
+  shipments Shipment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("shipping_boxes")
+}
+
+model ShippingRule {
+  id String @id @default(uuid()) @db.Uuid
+
+  name String
+  type String
+
+  minItems      Int?
+  maxItems      Int?
+  maxOrderValue Decimal? @db.Decimal(12, 2)
+
+  metadata Json?
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@map("shipping_rules")
+}
+
+// ======================================================
+// ENVIOS
+// ======================================================
+
+model Shipment {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  shippingBoxId String?      @db.Uuid
+  shippingBox   ShippingBox? @relation(fields: [shippingBoxId], references: [id], onDelete: SetNull)
+
+  status ShipmentStatus @default(PENDING)
+
+  provider       String?
+  shippingMethod String
+
+  providerShipmentId String?
+  trackingCode       String?
+
+  shippingCost Decimal @default(0) @db.Decimal(12, 2)
+
+  addressSnapshot Json?
+
+  items ShipmentItem[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([trackingCode])
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  shipmentId String   @db.Uuid
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  orderItemId String    @db.Uuid
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  quantity Int
+
+  @@unique([shipmentId, orderItemId])
+  @@index([shipmentId])
+  @@index([orderItemId])
+  @@map("shipment_items")
+}
+
+// ======================================================
+// FISCAL
+// ======================================================
+
+model Invoice {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @unique @db.Uuid
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  provider String
+
+  status InvoiceStatus @default(PENDING)
+
+  number    String?
+  series    String?
+  accessKey String? @unique
+
+  xmlUrl   String?
+  danfeUrl String?
+
+  errorCode    String?
+  errorMessage String? @db.Text
+
+  issuedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("invoices")
+}
