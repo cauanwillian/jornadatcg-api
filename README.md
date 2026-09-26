@@ -390,6 +390,33 @@ atômica, filtros, referências e conflitos de estoque.
 
 ## Carrinho de compras
 
+### Produto fictício para testes locais
+
+Para testar sem depender do Scrydex, execute:
+
+```powershell
+npm run seed:test-product
+```
+
+O comando cria no banco de `DATABASE_URL` uma coleção, uma carta identificada
+como `[TESTE] Pikachu fictício`, categoria, condição e idioma próprios de teste,
+além de um produto ativo de R$ 10,00 com cinco unidades disponíveis. Não exige
+chaves do Scrydex ou Asaas. Só executa fora de `NODE_ENV=production` e com
+`ASAAS_ENVIRONMENT=sandbox` (ou não definido).
+
+O ID do produto é `c70182cc-f671-480c-87f2-b4914659de22`. Executar novamente
+reutiliza o cadastro e exibe o estado atual: não duplica o produto nem repõe
+estoque consumido, zera reservas ou altera preços. O comando não cria usuários,
+carrinhos, pedidos ou cobranças. Nenhuma migration adicional é necessária.
+
+Com `$authHeaders` do login, adicione uma unidade:
+
+```powershell
+Invoke-RestMethod -Method Put `
+  -Uri 'http://localhost:3000/cart/items/c70182cc-f671-480c-87f2-b4914659de22' `
+  -Headers $authHeaders -ContentType 'application/json' -Body '{"quantity":1}'
+```
+
 As rotas `/cart` exigem JWT de um usuário autenticado, CUSTOMER ou ADMIN. Cada
 usuário acessa somente seu próprio carrinho; a identificação vem do token e não
 é recebida no corpo ou na URL. Não é necessário configurar Scrydex para operar
@@ -450,7 +477,7 @@ e não inclui frete ou descontos. `allItemsAvailable` só é verdadeiro quando o
 carrinho não está vazio e todos os itens estão disponíveis naquele momento.
 
 **O carrinho não reserva nem debita estoque e não garante preço ou disponibilidade
-para uma compra futura.** A etapa de pedidos deverá revalidar tudo e reservar
+para uma compra futura.** A etapa de pedidos revalida tudo e reserva
 estoque na sua própria transação. Limpar o carrinho de um usuário não afeta os
 demais, e remover um item ausente é uma operação idempotente.
 
@@ -472,6 +499,359 @@ Invoke-RestMethod -Method Delete -Uri 'http://localhost:3000/cart' -Headers $aut
 Os testes em `src/modules/cart/cart.spec.ts` cobrem autenticação, isolamento por
 usuário, quantidades, disponibilidade, atualização de preços, totais decimais,
 limites, remoção, repetição de PUT e tratamento de conflitos.
+
+## Pedidos e compras acumuladas
+
+O cliente pode fazer compras separadas para pedir um envio conjunto no futuro.
+Esta etapa cria pedidos **pendentes de pagamento**, sem exigir endereço ou cobrar
+frete. `shippingAmount` é `0.00` porque o envio será contratado separadamente;
+isso não significa frete grátis. Pagamentos Pix usam o Asaas; a solicitação de
+envio será implementada na próxima etapa. Somente compras com pagamento confirmado
+poderão ser liberadas para envio.
+
+Todos os endpoints abaixo exigem `Authorization: Bearer <accessToken>` e acessam
+apenas os pedidos do usuário autenticado, inclusive quando ele é administrador.
+
+| Método | Rota | Função |
+| --- | --- | --- |
+| POST | `/orders` | Criar pedido a partir do carrinho |
+| GET | `/orders?page=1&pageSize=20&status=PENDING_PAYMENT` | Listar os próprios pedidos |
+| GET | `/orders/:id` | Consultar um pedido com os itens da compra |
+| POST | `/orders/:id/cancel` | Cancelar pedido pendente e liberar a reserva |
+
+### Criar pedido
+
+Envie o header `Idempotency-Key` com um UUID v4 novo para cada checkout e o corpo:
+
+```json
+{ "expectedSubtotal": "25.90" }
+```
+
+Use o subtotal retornado por `GET /cart`. O valor deve ser uma string positiva
+com duas casas decimais, até `9999999999.99`. Outros campos no corpo são rejeitados;
+o servidor calcula os preços e obtém o usuário pelo token. Se o subtotal mudou,
+a resposta será 409 e será necessário consultar e confirmar o carrinho novamente.
+
+Na mesma transação serializável, o servidor revalida o carrinho, reserva as
+unidades (`availableQuantity` diminui, `reservedQuantity` aumenta), grava o pedido
+e esvazia o carrinho. `soldQuantity` permanece inalterado. Falhas revertem todas
+essas operações. O pedido guarda os preços e nomes das cartas, coleções, categorias,
+condições e idiomas no momento da compra, sem depender de alterações posteriores
+no catálogo.
+
+O endpoint retorna 200 tanto na criação como na repetição da mesma operação. Em
+caso de timeout ou perda de conexão, **repita a mesma chave e o mesmo corpo** para
+recuperar o pedido sem reservar novamente, mesmo após reiniciar o backend. A chave
+é exclusiva por usuário. Reutilizá-la com outro subtotal retorna 409; reutilizá-la
+após cancelar retorna o pedido cancelado. Uma nova compra exige uma nova chave.
+Depois de um checkout concluído, repetir sua chave não consome um carrinho novo.
+
+### Consulta e cancelamento
+
+A listagem retorna `{ items, page, pageSize, total }`. `page` vai de 1 a 1000000,
+`pageSize` de 1 a 100 (padrão 20), e `status` aceita os valores de `OrderStatus`.
+Valores monetários são strings com duas casas decimais e datas usam ISO 8601.
+Pedidos inexistentes ou pertencentes a outro usuário retornam 404.
+
+O cancelamento retorna 200 e só aceita pedidos `PENDING_PAYMENT` sem pagamento
+pendente, pago ou reembolsado. A liberação de estoque e a mudança para `CANCELLED`
+são atômicas. Repetir o cancelamento retorna o mesmo pedido sem liberar estoque
+novamente. Os itens não voltam automaticamente ao carrinho. Pedidos em outros
+estados, pagamentos em processamento e reservas inconsistentes retornam 409.
+
+Pedidos novos têm `expiresAt`, com prazo padrão de 30 minutos. Um worker verifica
+pedidos vencidos a cada minuto. Pedidos sem cobrança ativa são cancelados e suas
+reservas são liberadas. Havendo cobrança Pix, a liberação depende da confirmação
+de cancelamento no Asaas. Pedidos antigos sem `expiresAt` não são cancelados
+automaticamente; ao iniciar o primeiro Pix, recebem um prazo. Ainda não existe
+endpoint para iniciar o envio.
+
+Entradas inválidas retornam 400, ausência de autenticação 401, conflitos 409 e
+indisponibilidade do banco 503, sem expor informações internas.
+
+### Testar em PowerShell
+
+Com `$authHeaders` obtido no login e produtos adicionados ao carrinho:
+
+```powershell
+$cart = Invoke-RestMethod -Uri 'http://localhost:3000/cart' -Headers $authHeaders
+$checkoutKey = [guid]::NewGuid().ToString()
+$checkoutHeaders = @{
+  Authorization = $authHeaders.Authorization
+  'Idempotency-Key' = $checkoutKey
+}
+$checkoutBody = @{ expectedSubtotal = $cart.summary.subtotal } | ConvertTo-Json
+
+$order = Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/orders' `
+  -Headers $checkoutHeaders -ContentType 'application/json' -Body $checkoutBody
+
+Invoke-RestMethod -Uri 'http://localhost:3000/orders?page=1&pageSize=20' -Headers $authHeaders
+Invoke-RestMethod -Uri "http://localhost:3000/orders/$($order.id)" -Headers $authHeaders
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/orders/$($order.id)/cancel" -Headers $authHeaders
+```
+
+O prazo pode ser ajustado com `ORDER_RESERVATION_MINUTES` (1 a 1440). A alteração
+vale para novos prazos, sem modificar os já gravados. Para preparar outro ambiente:
+
+```powershell
+npx prisma migrate deploy --config prisma7.config.ts
+npx prisma generate --config prisma7.config.ts
+npm run build
+```
+
+A migration adiciona apenas `orders.checkoutKey` (nullable para compatibilidade
+com registros antigos) e um índice único de `userId + checkoutKey`.
+
+## Pagamentos Pix com Asaas
+
+### Configuração
+
+Adicione ao `.env`, sem versionar os valores reais:
+
+```dotenv
+ASAAS_ENVIRONMENT=sandbox
+ASAAS_API_KEY="sua-chave-do-sandbox"
+ASAAS_WEBHOOK_TOKEN="token-aleatorio-proprio-do-webhook"
+ORDER_RESERVATION_MINUTES=30
+```
+
+Use aspas na chave para preservar seu conteúdo. O ambiente padrão é `sandbox`;
+`production` precisa ser informado explicitamente e usa outra credencial.
+Os pagamentos são identificados por ambiente (`asaas:sandbox` ou `asaas:production`).
+Não troque o ambiente de uma instalação com cobranças pendentes; use instalações
+e bancos separados para testes e produção. Sem chave, os endpoints Pix retornam
+503 e a reconciliação externa permanece inativa. Carrinho e pedidos continuam
+disponíveis.
+
+O token do webhook deve ter de 32 a 255 caracteres, sem espaços, e ser diferente
+da API key. Gere um segredo aleatório localmente e configure o mesmo valor no
+Asaas e no `.env`. A configuração do webhook no painel Asaas deve apontar para:
+
+```text
+https://SEU-DOMINIO-PUBLICO/webhooks/asaas
+```
+
+O Asaas não consegue acessar `localhost`; para testar a entrega do webhook é
+necessário um endereço HTTPS público que encaminhe para o backend. Cadastre os
+eventos `PAYMENT_CREATED`, `PAYMENT_UPDATED`, `PAYMENT_CONFIRMED`,
+`PAYMENT_RECEIVED`, `PAYMENT_OVERDUE`, `PAYMENT_DELETED` e `PAYMENT_REFUNDED`.
+O header de autenticação esperado é `asaas-access-token`.
+
+Referências oficiais: [ambiente de testes](https://docs.asaas.com/docs/visao-geral),
+[configurar webhook](https://docs.asaas.com/docs/criar-novo-webhook-pela-aplicacao-web)
+e [cobrança Pix](https://docs.asaas.com/docs/cobrancas-via-pix).
+
+### Endpoints e teste local
+
+| Método | Rota | Função |
+| --- | --- | --- |
+| POST | `/orders/:orderId/payments/pix` | Criar ou recuperar o Pix do pedido |
+| GET | `/orders/:orderId/payments/pix` | Reconciliar e consultar o Pix |
+| GET | `/orders/:orderId/payments` | Consultar o histórico local de pagamentos |
+| POST | `/webhooks/asaas` | Receber atualizações autenticadas do Asaas |
+
+As três primeiras rotas exigem JWT e pertencimento do pedido. O cliente não pode
+informar preço, status de pagamento ou ID de outro pagador. O POST aceita somente
+`{ "cpf": "CPF_VALIDO_COM_11_DIGITOS" }`, valida os dígitos verificadores e registra
+o CPF no usuário se ainda não existir. Um CPF já registrado não pode ser substituído
+por esta rota. O pagador é localizado no Asaas por referência do usuário; novos
+cadastros têm notificações automáticas desabilitadas.
+
+Com `$authHeaders` do login e `$order` criado pelo checkout:
+
+```powershell
+$pixBody = @{ cpf = 'SEU_CPF_COM_11_DIGITOS' } | ConvertTo-Json
+$pix = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/orders/$($order.id)/payments/pix" `
+  -Headers $authHeaders -ContentType 'application/json' -Body $pixBody
+
+$pix.pix.payload # Pix copia e cola
+# $pix.pix.encodedImage contém a imagem PNG em Base64 para o futuro painel.
+
+Invoke-RestMethod -Uri "http://localhost:3000/orders/$($order.id)/payments/pix" -Headers $authHeaders
+Invoke-RestMethod -Uri "http://localhost:3000/orders/$($order.id)/payments" -Headers $authHeaders
+Invoke-RestMethod -Uri "http://localhost:3000/orders/$($order.id)" -Headers $authHeaders
+```
+
+A resposta Pix contém `{ payment, pix, reservationExpiresAt }`. O objeto `pix`
+inclui `encodedImage`, `payload` e `expirationDate` do provedor, e será `null`
+quando o pagamento não estiver pendente ou o prazo local tiver acabado.
+Valores monetários usam strings com duas casas decimais. O vencimento remoto do
+QR Code pode ser diferente do prazo local; o backend cancela a cobrança antes de
+devolver o estoque. Veja as [regras de validade do QR Code](https://docs.asaas.com/reference/obter-qr-code-para-pagamentos-via-pix).
+
+### Confirmação, repetição e expiração
+
+- Uma cobrança por pedido e ambiente: repetir o POST retorna a mesma intenção.
+  Um novo checkout deve ser feito somente depois de o anterior estar encerrado.
+- Antes do POST externo, a tentativa é persistida. Em timeout, erro ambíguo ou
+  reinício, a cobrança é procurada pela referência do pagamento local. O backend
+  não repete automaticamente uma criação incerta. Se uma falha ocorrer entre a
+  gravação da tentativa e seu envio, será necessária revisão no Asaas para liberar
+  a intenção; a reserva permanece protegida. HTTP 400 definitivo permite corrigir
+  a causa e repetir o mesmo pedido.
+- O webhook valida seu token e consulta a cobrança usando a API key do servidor.
+  Valor, pagador, referência, ambiente e método devem corresponder ao registro
+  local. Os dados de status e valor enviados no corpo do webhook não são confiados.
+- Apenas `RECEIVED` confirma o Pix. `CONFIRMED` pode representar análise cautelar
+  e mantém a reserva. Ao confirmar, pagamento e pedido ficam `PAID` e as unidades
+  passam de `reservedQuantity` para `soldQuantity` na mesma transação. A compra
+  permanece acumulada, sem gerar envio ou cobrar frete.
+- Notificações repetidas ou atrasadas não vendem nem liberam o estoque duas vezes.
+  A idempotência se baseia nas transições persistidas do pagamento e do pedido.
+- O worker de reconciliação roda a cada minuto em lotes de 20, como recuperação
+  para falhas de webhook e cobranças vencidas. O webhook é o mecanismo principal.
+  Ao vencer, cobranças `PENDING`/`OVERDUE` são consultadas e canceladas no Asaas;
+  o estado é consultado novamente antes da liberação. `OVERDUE` sozinho não
+  comprova cancelamento. Falhas de comunicação e estado incerto mantêm a reserva.
+- Cada instância evita sobreposição de seus ciclos. Transações serializáveis e
+  atualizações condicionais protegem as mudanças de estoque entre instâncias.
+
+Esta etapa cobre Pix. Cartão, boleto e estornos automáticos não estão implementados.
+Reembolsos, divergências e aprovação após encerramento exigem revisão financeira;
+o backend não repõe automaticamente estoque de uma compra que pode ter sido enviada.
+Nesses casos o webhook retorna 409 e os logs da reconciliação sinalizam o pagamento.
+Monitore a fila de webhooks do Asaas: falhas repetidas podem pausá-la. O processamento
+atual é síncrono e só responde 200 após consulta/aplicação; uma fila persistente de
+eventos é uma evolução para maior volume.
+
+Erros do provedor são sanitizados: 400 para recusa definitiva, 502 para resposta
+inválida, 503 para indisponibilidade/configuração e 504 para timeout. Nenhuma chave,
+CPF ou resposta bruta do provedor é incluída em mensagens de erro.
+
+As migrations adicionam o prazo de reserva e seu índice, os identificadores do
+pagador/tentativa externa e a unicidade por pedido/provedor. Execute `migrate deploy`
+antes de iniciar a versão nova. Os testes automatizados simulam o Asaas; a validação
+com a conta sandbox requer suas credenciais e a configuração do webhook.
+
+## Endereços e compras disponíveis para envio
+
+Todas as rotas abaixo exigem `Authorization: Bearer SEU_ACCESS_TOKEN` e acessam
+somente dados da conta autenticada.
+
+| Método | Rota | Uso |
+| --- | --- | --- |
+| POST | `/addresses` | Cadastrar endereço |
+| GET | `/addresses` | Listar endereços |
+| GET | `/addresses/:id` | Consultar endereço |
+| PUT | `/addresses/:id` | Substituir endereço |
+| DELETE | `/addresses/:id` | Excluir endereço |
+| GET | `/shipments/available-items?page=1&pageSize=20` | Consultar compras acumuladas |
+
+Exemplo no PowerShell, substituindo os dados pelo endereço do destinatário:
+
+```powershell
+$authHeaders = @{ Authorization = "Bearer SEU_ACCESS_TOKEN" }
+$addressBody = @{
+  label = "Casa"
+  recipientName = "Nome do destinatário"
+  zipCode = "78000-000"
+  street = "Nome da rua"
+  number = "123"
+  complement = ""
+  neighborhood = "Bairro"
+  city = "Cuiabá"
+  state = "MT"
+  isDefault = $true
+} | ConvertTo-Json
+
+$address = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/addresses" `
+  -Headers $authHeaders -ContentType "application/json" -Body $addressBody
+$address | ConvertTo-Json
+
+Invoke-RestMethod -Method Get `
+  -Uri "http://localhost:3000/shipments/available-items?page=1&pageSize=20" `
+  -Headers $authHeaders | ConvertTo-Json -Depth 6
+```
+
+O CEP aceita oito dígitos com ou sem hífen; a UF deve ser brasileira. `label` e
+`complement` são opcionais e aceitam `null`. O PUT exige todos os campos obrigatórios
+novamente. `isDefault` é opcional: o primeiro endereço é sempre principal; definir
+outro como principal desmarca o anterior. Para desmarcar o principal, escolha outro
+endereço como principal. Ao excluir o principal, o mais antigo restante assume essa
+posição. Cada conta pode cadastrar até 20 endereços.
+
+A consulta de compras retorna `items`, `page`, `pageSize`, `total` e `summary`.
+Cada item identifica o pedido e seu item, preserva nome/preço da compra e informa
+`purchasedQuantity`, `allocatedQuantity`, `availableQuantity`, `unitPrice` e
+`availableSubtotal`. Valores monetários são strings com duas casas decimais.
+O resumo contém `availableQuantity` e `availableValue` de todos os resultados,
+independentemente da página. `pageSize` aceita de 1 a 100 (padrão 20).
+
+Somente compras com pagamento confirmado, sem pagamento reembolsado, são elegíveis.
+Quantidades vinculadas a envios não cancelados são descontadas, inclusive envios
+parciais; envios cancelados liberam essas quantidades para a consulta. Itens totalmente
+alocados não aparecem. Os dados históricos continuam disponíveis mesmo se o produto
+for removido do catálogo. Nenhum resultado retorna lista vazia em `items`.
+
+Esta consulta não reserva itens. A criação de uma solicitação de envio revalida e
+aloca as quantidades em uma transação serializável. Estes endpoints não exigem novas
+variáveis de ambiente nem migration adicional.
+
+### Solicitar envio das compras acumuladas
+
+| Método | Rota | Uso |
+| --- | --- | --- |
+| POST | `/shipments` | Solicitar envio de itens de uma ou mais compras |
+| GET | `/shipments?page=1&pageSize=20` | Listar solicitações da conta |
+| GET | `/shipments/:id` | Consultar solicitação |
+| POST | `/shipments/:id/cancel` | Cancelar solicitação pendente, antes de definir frete |
+
+O POST exige `Idempotency-Key` UUID v4, `addressId` de um endereço próprio e `items`
+com 1 a 100 itens distintos (`orderItemId` e `quantity` inteira positiva). Não aceita
+preço, frete ou status enviados pelo cliente. As quantidades podem ser parciais e vir
+de pedidos diferentes. O endereço é copiado para o envio e não muda quando o cadastro
+é atualizado ou excluído. A solicitação nasce `PENDING`, com
+`shippingMethod: "TO_BE_DEFINED"` e `shippingCost: null` na resposta: frete ainda não
+calculado. Isso não representa frete grátis. Cotação, pagamento do frete e postagem
+serão implementados na próxima etapa.
+
+Exemplo: consulte as compras e endereços, escolha os IDs retornados e execute:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:3000/addresses" -Headers $authHeaders
+Invoke-RestMethod -Uri "http://localhost:3000/shipments/available-items" `
+  -Headers $authHeaders | ConvertTo-Json -Depth 6
+
+$shipmentKey = [guid]::NewGuid().ToString()
+$shipmentHeaders = @{
+  Authorization = $authHeaders.Authorization
+  "Idempotency-Key" = $shipmentKey
+}
+$shipmentBody = @{
+  addressId = "ID_DO_ENDERECO"
+  items = @(
+    @{ orderItemId = "ORDER_ITEM_ID_RETORNADO_NA_CONSULTA"; quantity = 1 }
+  )
+} | ConvertTo-Json -Depth 6
+
+$shipment = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/shipments" -Headers $shipmentHeaders `
+  -ContentType "application/json" -Body $shipmentBody
+$shipment | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Uri "http://localhost:3000/shipments/$($shipment.id)" `
+  -Headers $authHeaders | ConvertTo-Json -Depth 6
+
+# Opcional: cancelar antes de definir o frete
+# Invoke-RestMethod -Method Post `
+#   -Uri "http://localhost:3000/shipments/$($shipment.id)/cancel" -Headers $authHeaders
+```
+
+Em caso de timeout, repita o POST com o mesmo corpo e os mesmos `$shipmentHeaders`.
+Não gere outra chave para repetir a mesma operação. A chave é usada como ID da
+solicitação; tanto criação quanto repetição retornam HTTP 200. Reutilizá-la com
+outro conteúdo retorna 409. Repetir uma solicitação cancelada devolve seu estado
+cancelado; uma nova solicitação precisa de outra chave.
+
+O cancelamento mantém o histórico e libera as quantidades para outra solicitação,
+sem alterar estoque vendido nem o pagamento da compra. Só é permitido enquanto
+`PENDING`, sem frete definido ou identificadores de postagem. Repetir o cancelamento
+é seguro. Itens indisponíveis ou quantidade insuficiente retornam 409; endereço ou
+solicitação de outra conta retorna 404; entrada inválida retorna 400.
 
 ## Comandos de teste
 

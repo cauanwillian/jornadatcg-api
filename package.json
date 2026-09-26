@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "admin:promote": "node dist/cli/promote-admin.js",
+    "seed:test-product": "npm run build && node dist/cli/seed-test-product.js",
     "build": "nest build",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

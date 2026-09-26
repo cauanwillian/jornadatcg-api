@@ -309,6 +309,8 @@ model CartItem {
 model Order {
   id          String @id @default(uuid()) @db.Uuid
   orderNumber Int    @unique @default(autoincrement())
+  checkoutKey String? @db.Uuid
+  expiresAt   DateTime?
 
   userId String @db.Uuid
   user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -336,6 +338,8 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@map("orders")
+  @@unique([userId, checkoutKey])
+  @@index([status, expiresAt])
 }
 
 model OrderItem {
@@ -380,6 +384,8 @@ model Payment {
 
   provider          String
   providerPaymentId String? @unique
+  providerCustomerId String?
+  providerRequestStartedAt DateTime?
 
   method PaymentMethod
   status PaymentStatus @default(PENDING)
@@ -396,6 +402,7 @@ model Payment {
   @@index([orderId])
   @@index([status])
   @@map("payments")
+  @@unique([orderId, provider])
 }
 
 // ======================================================
