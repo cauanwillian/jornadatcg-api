@@ -798,16 +798,17 @@ variáveis de ambiente nem migration adicional.
 | POST | `/shipments` | Solicitar envio de itens de uma ou mais compras |
 | GET | `/shipments?page=1&pageSize=20` | Listar solicitações da conta |
 | GET | `/shipments/:id` | Consultar solicitação |
-| POST | `/shipments/:id/cancel` | Cancelar solicitação pendente, antes de definir frete |
+| POST | `/shipments/:id/cancel` | Cancelar solicitação pendente sem cobrança ativa |
 
 O POST exige `Idempotency-Key` UUID v4, `addressId` de um endereço próprio e `items`
-com 1 a 100 itens distintos (`orderItemId` e `quantity` inteira positiva). Não aceita
+com itens distintos (`orderItemId` e `quantity` inteira positiva), somando no máximo
+70 cartas por solicitação. Não aceita
 preço, frete ou status enviados pelo cliente. As quantidades podem ser parciais e vir
 de pedidos diferentes. O endereço é copiado para o envio e não muda quando o cadastro
 é atualizado ou excluído. A solicitação nasce `PENDING`, com
 `shippingMethod: "TO_BE_DEFINED"` e `shippingCost: null` na resposta: frete ainda não
-calculado. Isso não representa frete grátis. Cotação, pagamento do frete e postagem
-serão implementados na próxima etapa.
+calculado. Isso não representa frete grátis. Cotação e pagamento do frete são
+descritos abaixo; a emissão pelo Melhor Envio está documentada na seção administrativa.
 
 Exemplo: consulte as compras e endereços, escolha os IDs retornados e execute:
 
@@ -836,7 +837,7 @@ $shipment | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Uri "http://localhost:3000/shipments/$($shipment.id)" `
   -Headers $authHeaders | ConvertTo-Json -Depth 6
 
-# Opcional: cancelar antes de definir o frete
+# Opcional: cancelar antes de gerar a cobrança do frete
 # Invoke-RestMethod -Method Post `
 #   -Uri "http://localhost:3000/shipments/$($shipment.id)/cancel" -Headers $authHeaders
 ```
@@ -849,9 +850,127 @@ cancelado; uma nova solicitação precisa de outra chave.
 
 O cancelamento mantém o histórico e libera as quantidades para outra solicitação,
 sem alterar estoque vendido nem o pagamento da compra. Só é permitido enquanto
-`PENDING`, sem frete definido ou identificadores de postagem. Repetir o cancelamento
+`PENDING`, sem pagamento pendente, pago ou reembolsado e sem identificadores de
+postagem. Uma cotação selecionada, sozinha, não bloqueia o cancelamento. Repetir o cancelamento
 é seguro. Itens indisponíveis ou quantidade insuficiente retornam 409; endereço ou
 solicitação de outra conta retorna 404; entrada inválida retorna 400.
+
+### Cotação e pagamento separado do frete
+
+O CEP de origem padrão é **78556-858**. A embalagem é definida pelo servidor:
+
+| Quantidade total de cartas | Caixa | Altura × largura × comprimento | Peso total |
+| --- | --- | --- | --- |
+| 1 a 30 | Pequena | 3 × 12 × 17 cm | 150 g |
+| 31 a 70 | Média | 5 × 10 × 15 cm | 150 g |
+
+O peso inclui cartas, caixa e proteção, conforme informado pela loja. Acima de 70
+cartas, o cliente deve dividir em solicitações separadas. Não há divisão automática
+em volumes. Os valores são centralizados em `src/modules/shipments/shipping-package.ts`.
+As APIs recebem peso em kg (0,15), dimensões em cm e valor declarado calculado pelos
+preços históricos dos itens selecionados.
+
+| Método | Rota | Uso |
+| --- | --- | --- |
+| POST | `/shipments/:id/quotes` | Cotar nos provedores configurados |
+| POST | `/shipments/:id/quotes/:quoteId/select` | Escolher uma cotação salva |
+| POST | `/shipments/:id/payments/pix` | Criar ou recuperar o Pix do frete, com `{ "cpf": "..." }` |
+| GET | `/shipments/:id/payments/pix` | Consultar e reconciliar o Pix do frete |
+
+As rotas exigem Bearer e verificam a propriedade do envio. A cotação retorna
+`options`, `providers`, `package` e `expiresAt`. Cada opção tem `id`, `provider`,
+`serviceCode`, `serviceName`, `carrier`, `amount`, `deliveryDays` e `expiresAt`.
+O nome do provedor inclui o ambiente, por exemplo `superfrete:sandbox`.
+Preços são strings decimais. O cliente envia apenas o ID da opção, nunca o valor
+que será cobrado. GET `/shipments/:id` também informa a cotação selecionada e
+`shippingPaidAt`.
+
+Cada lote de cotações vale **15 minutos na aplicação**; não representa garantia
+de preço para uma futura compra de etiqueta. Uma nova cotação invalida o lote e
+a seleção anteriores. Depois que uma cobrança é criada, preço e escolha ficam
+bloqueados. Cotação e pagamento são operações separadas da contratação da etiqueta.
+A falha de um provedor não elimina opções dos outros. `providers` distingue
+`OK`, `NOT_CONFIGURED`, `TIMEOUT`, `INVALID_RESPONSE` e `UNAVAILABLE`. Sem nenhum
+provedor respondendo, a API retorna 503; com resposta válida sem cobertura, retorna
+200 com `options: []`. Não existem preços fictícios de fallback.
+
+Configure no `.env` (nunca envie os tokens ao Git):
+
+```dotenv
+SHIPPING_ORIGIN_ZIP_CODE=78556858
+SHIPPING_CONTACT_EMAIL=seu-email-de-contato-tecnico
+MELHOR_ENVIO_ENVIRONMENT=sandbox
+MELHOR_ENVIO_TOKEN=
+SUPERFRETE_ENVIRONMENT=sandbox
+SUPERFRETE_TOKEN=
+FRENET_TOKEN=
+```
+
+`SHIPPING_CONTACT_EMAIL` precisa ser um e-mail válido para o User-Agent técnico.
+Um provedor sem token fica desabilitado. Melhor Envio e SuperFrete aceitam
+`sandbox` ou `production` e usam tokens próprios de cada ambiente. A cotação Frenet
+usa HTTPS no ambiente real. O Pix continua usando as variáveis `ASAAS_*` existentes;
+cotações de sandbox não podem gerar uma cobrança Asaas de produção.
+
+Documentação oficial usada para os adaptadores:
+
+- [Melhor Envio: cálculo por produtos ou volumes](https://docs.melhorenvio.com.br/reference/calculo-de-fretes-por-produtos).
+- [SuperFrete: cotação](https://superfrete.readme.io/reference/cotacao-de-frete) e [geração de token](https://superfrete.readme.io/reference/primeiros-passos).
+- [Frenet: cotação](https://docs.frenet.com.br/reference/calculateshippingquote) e [acesso ao token](https://ajuda.frenet.com.br/knowledge-base/api-frenet/).
+
+Depois de criar uma solicitação e configurar ao menos um provedor:
+
+```powershell
+$shipmentId = "ID_DA_SOLICITACAO_DE_ENVIO"
+$quotes = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/shipments/$shipmentId/quotes" -Headers $authHeaders
+$quotes | ConvertTo-Json -Depth 6
+
+# Escolha um ID retornado em options; não use o ID do pedido de compra.
+$quoteId = "ID_DA_COTACAO_ESCOLHIDA"
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/shipments/$shipmentId/quotes/$quoteId/select" `
+  -Headers $authHeaders
+
+$freightBody = @{ cpf = "SEU_CPF_VALIDO_COM_11_DIGITOS" } | ConvertTo-Json
+$freightPix = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/shipments/$shipmentId/payments/pix" `
+  -Headers $authHeaders -ContentType "application/json" -Body $freightBody
+$freightPix | ConvertTo-Json -Depth 6
+
+# Após confirmar no Asaas sandbox:
+Invoke-RestMethod `
+  -Uri "http://localhost:3000/shipments/$shipmentId/payments/pix" `
+  -Headers $authHeaders | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://localhost:3000/shipments/$shipmentId" `
+  -Headers $authHeaders | ConvertTo-Json -Depth 6
+```
+
+A cobrança do frete tem `shipmentId` preenchido e `orderId: null`, com o mesmo
+formato de QR Code dos pagamentos de compra. Repetir o POST no mesmo envio/ambiente
+recupera a intenção existente. A API nunca repete uma criação externa incerta sem
+reconciliação. O prazo do Pix acompanha a validade da cotação. O mesmo webhook
+`POST /webhooks/asaas` e o worker periódico verificam ambas as modalidades.
+Somente `RECEIVED` confirmado pelo Asaas marca o frete como pago e avança o envio
+para `PREPARING`. Pagamentos de cartas e estoque vendido não são modificados.
+
+Na expiração, uma cobrança externa precisa ser cancelada e consultada novamente
+antes de encerrar a intenção local. Enquanto houver incerteza, o cancelamento do
+envio continua bloqueado. Se a cobrança for encerrada sem pagamento, cancele a
+solicitação e crie outra para cotar/pagar novamente; nesta versão há uma intenção
+por envio/provedor. Reembolso e pagamento após encerramento exigem revisão financeira.
+
+A migration `20261001000304_shipping_quotes_payments` cria as cotações e permite
+que cada pagamento pertença **exatamente a um pedido ou a um envio**, por constraint
+no PostgreSQL. Em outro ambiente execute:
+
+```powershell
+npx prisma migrate deploy --config prisma7.config.ts
+npx prisma generate --config prisma7.config.ts
+```
+
+Os testes automatizados simulam as três APIs e o Asaas. A validação com cotações
+reais depende da criação das contas e dos tokens. Compra, impressão e sincronização manual de etiquetas Melhor Envio estão disponíveis na seção administrativa.
 
 ## Comandos de teste
 
@@ -925,3 +1044,273 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Preparação administrativa e etiquetas Melhor Envio
+
+Todos os endpoints abaixo exigem Bearer de usuário ADMIN. A embalagem só pode ser
+conferida após confirmação do pagamento das compras e do frete.
+
+Preencha no `.env` os campos `SHIPPING_SENDER_*` do `.env.example` com nome,
+documento, telefone, e-mail e endereço do remetente. O CEP continua sendo
+`SHIPPING_ORIGIN_ZIP_CODE=78556858`. Reinicie o servidor após configurar.
+Complemento é opcional. Em produção, esta integração exige inscrição estadual do
+remetente e chave de nota fiscal (`invoiceKey`, 44 dígitos). No sandbox, a ausência
+da chave é aceita exclusivamente para simulação.
+
+| Método | Endpoint | Finalidade |
+| --- | --- | --- |
+| GET | `/admin/shipments?page=1&pageSize=20` | Fila de preparação e postagem |
+| POST | `/admin/shipments/:id/pack` | Registrar conferência física da embalagem |
+| POST | `/admin/shipments/:id/label` | Inserir etiqueta no carrinho do provedor |
+| POST | `/admin/shipments/:id/label/checkout` | Comprar com saldo da carteira Melhor Envio |
+| POST | `/admin/shipments/:id/label/generate` | Gerar etiqueta comprada |
+| GET | `/admin/shipments/:id/label/print` | Obter link privado de impressão |
+| POST | `/admin/shipments/:id/label/sync` | Consultar pagamento, geração, postagem e entrega |
+| POST | `/admin/shipments/:id/label/recover/:remoteId` | Vincular criação cuja resposta foi perdida |
+
+Exemplo PowerShell, após login de administrador e conferência física:
+
+```powershell
+$shipmentId = 'ID_DO_ENVIO'
+$base = "http://localhost:3000/admin/shipments/$shipmentId"
+Invoke-RestMethod -Method Post -Uri "$base/pack" -Headers $authHeaders
+
+$body = @{
+  recipientDocument = 'CPF_DO_DESTINATARIO_COM_11_DIGITOS'
+  recipientPhone = 'TELEFONE_COM_DDD'
+} | ConvertTo-Json
+$label = Invoke-RestMethod -Method Post -Uri "$base/label" `
+  -Headers $authHeaders -ContentType 'application/json' -Body $body
+$label | ConvertTo-Json -Depth 6
+```
+
+Confira `cost` antes da compra. Execute separadamente:
+
+```powershell
+$checkout = @{ expectedCost = [string]$label.cost } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$base/label/checkout" `
+  -Headers $authHeaders -ContentType 'application/json' -Body $checkout
+Invoke-RestMethod -Method Post -Uri "$base/label/generate" -Headers $authHeaders
+Invoke-RestMethod -Uri "$base/label/print" -Headers $authHeaders
+Invoke-RestMethod -Method Post -Uri "$base/label/sync" -Headers $authHeaders
+```
+
+O Pix do cliente no Asaas não abastece automaticamente a carteira Melhor Envio.
+A compra de etiqueta usa saldo dessa carteira, conforme a
+[documentação de compra de fretes](https://docs.melhorenvio.com.br/reference/compra-de-fretes-1).
+O link de impressão é privado e exige acesso à conta Melhor Envio.
+
+São suportados nesta etapa os serviços Correios/Jadlog de códigos 1, 2, 3, 4 e 17.
+Superfrete e Frenet continuam disponíveis para cotação, sem emissão de etiquetas.
+A compra bloqueia custo superior ao frete pago e pagamentos sandbox em produção.
+
+Tentativas são persistidas antes de chamadas externas. Se houver timeout ou falha
+ambígua, não repita a compra às cegas: use `label/sync` e confira o painel do
+provedor. Se a criação perdeu a resposta, obtenha o UUID da etiqueta no painel e
+use `recover`; a API confere serviço, CEPs, documento e identificação do envio.
+Não apague registros para contornar esses bloqueios.
+
+A geração confirmada muda o envio para `READY_TO_SHIP`. A sincronização manual
+atualiza `SHIPPED` e `DELIVERED` conforme o provedor; há também sincronização automática descrita abaixo. Cancelamento ou suspensão externa exige revisão administrativa e
+não libera automaticamente itens nem estorna pagamentos.
+
+## Sincronização automática de etiquetas
+
+O worker de etiquetas consulta o Melhor Envio a cada 60 segundos enquanto a API
+estiver em execução. Configure `SHIPPING_LABEL_SYNC_ENABLED=false` para desativar
+ou `SHIPPING_LABEL_SYNC_INTERVAL_SECONDS` entre 30 e 3600 para ajustar o intervalo.
+Os valores padrão dispensam alterações no `.env` existente.
+
+Cada execução percorre até 20 etiquetas do ambiente configurado, em sequência,
+com cursor para não deixar os últimos registros sem consulta. Envios entregues,
+cancelados ou etiquetas que exigem revisão não são consultados automaticamente.
+Falhas isoladas são registradas sem respostas externas ou dados pessoais e voltam
+a ser consultadas em um ciclo posterior. O worker apenas consulta etiquetas já
+vinculadas: não cria, compra nem solicita geração de etiquetas.
+
+A sincronização manual continua disponível. Execuções não se sobrepõem na mesma
+instância; em múltiplas réplicas, habilite o worker em apenas uma para evitar
+consultas duplicadas ao provedor. Não há trava distribuída nesta etapa.
+
+## Renovação de sessão
+
+`POST /auth/login` mantém o JSON com `accessToken`, `expiresIn`, `tokenType` e
+`user`, e adiciona o cookie `jornada_refresh`: HttpOnly, SameSite=Strict,
+Path=/auth e Secure em produção (`NODE_ENV=production`, HTTPS obrigatório).
+O token de acesso volta a durar 15 minutos; tokens antigos de 8 horas devem ser
+substituídos por um novo login. O refresh token tem validade absoluta de 30 dias,
+sem prolongamento a cada uso, e somente seu hash é armazenado no banco.
+
+`POST /auth/refresh` usa o cookie, dispensa Bearer e devolve um novo access token,
+substituindo o cookie. `POST /auth/logout` revoga a sessão do cookie e retorna 204.
+Os dois endpoints exigem `X-Requested-With: JornadaTCG`. Logout não invalida
+imediatamente JWTs de acesso já emitidos: eles expiram em até 15 minutos.
+Reutilizar um refresh token consumido revoga toda a sessão correspondente.
+O frontend deve serializar renovações (inclusive entre abas), não repetir
+automaticamente um refresh cuja resposta se perdeu e pedir novo login em 401.
+
+Configure `AUTH_ALLOWED_ORIGINS` com as origens exatas do frontend. Requisições
+com Origin não autorizado são rejeitadas; CORS permite credenciais somente nas
+origens configuradas. Frontend e API precisam estar no mesmo site para o cookie
+SameSite=Strict (por exemplo app.exemplo.com e api.exemplo.com, ambos HTTPS).
+No frontend use `credentials: 'include'` no login, refresh e logout, mantenha o
+access token em memória e envie Bearer nas demais rotas. A renovação automática
+na interface será implementada quando o frontend for criado.
+
+PowerShell, preservando o cookie na mesma sessão:
+
+```powershell
+$credenciais = Get-Credential -Message 'E-mail e senha'
+$loginBody = @{ email = $credenciais.UserName; password = $credenciais.GetNetworkCredential().Password } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/auth/login' -ContentType 'application/json' -Body $loginBody -SessionVariable sessao -ErrorAction Stop
+$authHeaders = @{ Authorization = "Bearer $($login.accessToken)" }
+
+# Renovar sem digitar a senha novamente
+$login = Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/auth/refresh' -WebSession $sessao -Headers @{ 'X-Requested-With' = 'JornadaTCG' } -ErrorAction Stop
+$authHeaders = @{ Authorization = "Bearer $($login.accessToken)" }
+
+# Encerrar esta sessão
+Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/auth/logout' -WebSession $sessao -Headers @{ 'X-Requested-With' = 'JornadaTCG' } -ErrorAction Stop
+```
+
+Migration: `20261003060000_refresh_sessions`, com RLS habilitada sem acesso público
+à tabela de tokens. Tokens consumidos são mantidos até o fim da validade para
+permitir detecção de reutilização; limpeza periódica de registros expirados pode
+ser configurada posteriormente conforme a política de retenção.
+
+## Catálogo público
+
+Disponível sem login, usando apenas produtos já cadastrados no banco:
+
+- `GET /catalog/products`: lista paginada.
+- `GET /catalog/products/:id`: detalhes; produto oculto ou inexistente retorna 404.
+- `GET /catalog/filters`: categorias, condições, idiomas e raridades com anúncios
+  visíveis, e faixa global de preços (`null` quando vazia).
+
+Parâmetros da listagem: `name` (busca parcial sem distinguir maiúsculas),
+`categoryId`, `conditionId`, `languageId` (UUID), `rarity` (valor exato),
+`minPrice`, `maxPrice` (decimal com ponto), `stock=available|unavailable`,
+`sort=newest|oldest|price_asc|price_desc`, `page` (1 a 10000) e `limit` (1 a 100).
+Padrões: página 1, 24 itens, mais recentes; inclui esgotados. Parâmetros inválidos,
+repetidos ou desconhecidos retornam 400. Nenhum resultado retorna lista vazia.
+
+A resposta contém `data` e `pagination` com `page`, `limit`, `total`, `totalPages`
+e `hasMore`. Para carregar mais, incremente `page` mantendo os mesmos filtros.
+Ao mudar filtros, volte à página 1. Empates usam o ID para ordenação estável;
+como a paginação usa páginas, alterações no catálogo entre consultas podem
+mudar a posição dos itens.
+
+Produtos, categorias, condições e idiomas inativos ficam ocultos. A resposta
+contém preço como string decimal, dados da carta e coleção, imagens, observação,
+condição, idioma, categoria, `availableQuantity` e `inStock`. Estoque ausente é
+tratado como zero. Estoque reservado, vendido e metadados externos não são
+expostos. Disponibilidade é informativa e é revalidada no checkout existente.
+`observation` e demais textos devem ser exibidos pelo frontend como texto,
+sem renderização de HTML não confiável.
+
+```powershell
+Invoke-RestMethod 'http://localhost:3000/catalog/products?name=Pikachu&stock=available&sort=price_asc&page=1&limit=24' | ConvertTo-Json -Depth 8
+Invoke-RestMethod 'http://localhost:3000/catalog/products?minPrice=5.00&maxPrice=50.00' | ConvertTo-Json -Depth 8
+Invoke-RestMethod 'http://localhost:3000/catalog/filters' | ConvertTo-Json -Depth 6
+```
+
+Cadastro e edição continuam restritos ao administrador em `/products`.
+Esta etapa não inclui banners, destaques nem estimativa de frete antes da compra.
+Não exige migration ou novas variáveis de ambiente.
+
+## Estimativa pública de frete
+
+`GET /catalog/products/:id/shipping-estimate?zipCode=78000000&quantity=1`
+
+Não exige login. `zipCode` aceita oito dígitos ou o formato `78000-000`;
+`quantity` é opcional (padrão 1), inteiro de 1 a 70, limitado ao estoque disponível.
+Produto oculto/inexistente retorna 404; quantidade sem estoque retorna 409;
+parâmetros inválidos retornam 400. Há limite de 10 consultas por minuto por IP
+(429 quando excedido). O limitador padrão é local à instância da API.
+
+O backend consulta os provedores configurados usando o preço do banco, CEP de
+origem existente e embalagem pequena até 30 cartas ou média de 31 a 70, ambas
+com 150 g. Retorna `estimated`, `quotedAt`, `declaredValue`, `package`, `options`
+e diagnóstico normalizado de cada provedor. Opções são ordenadas por preço e
+prazo. Falhas parciais preservam as demais opções; indisponibilidade de todos
+retorna 503; ausência de serviços em uma rota retorna opções vazias quando ao
+menos um provedor respondeu normalmente.
+
+Esta consulta não grava cotação, não reserva estoque, não cria pedido/envio nem
+cobra o cliente. O valor não inclui outras compras acumuladas. Não use suas
+opções para selecionar ou pagar frete: solicite uma nova cotação no fluxo de
+envio existente. O frontend deve explicar que se trata de estimativa, inclusive
+quando o provedor retornado indica sandbox.
+
+```powershell
+$produtoId = 'ID_DO_PRODUTO'
+Invoke-RestMethod "http://localhost:3000/catalog/products/$produtoId/shipping-estimate?zipCode=78000000&quantity=1" | ConvertTo-Json -Depth 8
+```
+
+Reutiliza as variáveis de frete existentes. Não exige migration.
+
+## Produtos em destaque
+
+O administrador pode definir `featured` (booleano) e `featuredOrder` (inteiro
+não negativo, menor primeiro) em `POST /products` ou `PATCH /products/:id`.
+Esses campos também são retornados nas consultas administrativas. Produtos
+existentes começam com `featured=false`, sem alteração de estoque ou preço.
+
+`GET /catalog/featured` é público e retorna `{ data: [...] }`, com até 24 produtos
+marcados, ativos, com referências ativas e estoque disponível maior que zero.
+Empates de ordem usam o ID do produto. A resposta tem o mesmo formato público do
+catálogo, sem estoque reservado/vendido. Lista vazia retorna 200.
+
+O destaque fica salvo quando o produto esgota ou é desativado, mas fica oculto
+até voltar a cumprir as regras. Para removê-lo definitivamente, envie
+`featured=false`. Não há escolha automática de destaques.
+
+```powershell
+# Use o ID real do produto e o Bearer de administrador
+$body = @{ featured = $true; featuredOrder = 1 } | ConvertTo-Json
+Invoke-RestMethod -Method Patch -Uri "http://localhost:3000/products/$produtoId" -Headers $authHeaders -ContentType 'application/json' -Body $body -ErrorAction Stop
+
+# Consulta pública
+Invoke-RestMethod 'http://localhost:3000/catalog/featured' | ConvertTo-Json -Depth 8
+
+# Remover destaque
+$body = @{ featured = $false } | ConvertTo-Json
+Invoke-RestMethod -Method Patch -Uri "http://localhost:3000/products/$produtoId" -Headers $authHeaders -ContentType 'application/json' -Body $body -ErrorAction Stop
+```
+
+Migration: `20261003080000_featured_products`. Nenhuma variável nova no `.env`.
+
+## Banners da página inicial
+
+Formato inicial: imagem estática de 1600 × 500 pixels, PNG/JPEG/WebP, até 5 MB.
+A API decodifica e converte para WebP, removendo metadados. Imagens ficam em BYTEA
+no PostgreSQL, adequadas ao pequeno volume inicial de banners; considerar object
+storage/CDN ao crescer. Não há arquivos locais nem credenciais adicionais.
+
+- `GET /banners`: até 20 banners ativos, ordenados por sortOrder e ID.
+- `GET /banners/:id/image`: imagem WebP, somente banner ativo.
+- `GET /admin/banners`: lista administrativa (até 100 registros).
+- `POST /admin/banners`: multipart/form-data com image e title obrigatórios;
+  link opcional (caminho interno como /catalogo), active (padrão false) e
+  sortOrder (inteiro 0–999999, padrão 0).
+- `PATCH /admin/banners/:id`: JSON para editar title, link, active e sortOrder.
+- `POST /admin/banners/:id/image`: multipart com image para substituir a imagem.
+- `GET /admin/banners/:id/image`: prévia autenticada, inclusive inativos.
+- `DELETE /admin/banners/:id`: remove banner e imagem, retorna 204.
+
+Todas as rotas administrativas exigem Bearer ADMIN. Os retornos JSON contêm
+imageUrl relativo à origem da API e não incluem bytes da imagem. O frontend deve
+usar title como texto alternativo e renderizar textos sem HTML. Erros de arquivo
+inválido retornam 400, upload acima do limite retorna 413 e inexistente retorna
+404. Link externo não é aceito nesta etapa.
+
+Exemplo compatível com Windows PowerShell usando curl.exe (imagem já preparada):
+
+```powershell
+$imagem = 'C:\Users\cauan\Pictures\banner.png'
+if (!(Test-Path -LiteralPath $imagem)) { throw 'Arquivo não encontrado.' }
+curl.exe --fail-with-body -X POST 'http://localhost:3000/admin/banners' -H "Authorization: Bearer $($login.accessToken)" -F 'title=Bem-vindo à JornadaTCG' -F 'active=true' -F 'sortOrder=1' -F 'link=/catalogo' -F "image=@$imagem"
+Invoke-RestMethod 'http://localhost:3000/banners' | ConvertTo-Json -Depth 6
+```
+
+Migration: `20261005090000_banners`, com RLS habilitada sem acesso direto público.

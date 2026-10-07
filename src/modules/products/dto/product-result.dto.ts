@@ -5,6 +5,8 @@ export const productSelect = {
   price: true,
   observation: true,
   active: true,
+  featured: true,
+  featuredOrder: true,
   createdAt: true,
   updatedAt: true,
   card: {

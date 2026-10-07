@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RefreshSessionService } from './refresh-session.service.js';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from '../../database/database.module.js';
@@ -18,6 +19,7 @@ import { LoginBodyPipe, RegisterBodyPipe } from './dto/auth.dto.js';
   ],
   controllers: [AuthController],
   providers: [
+    RefreshSessionService,
     AuthService,
     AuthTokenService,
     PasswordService,

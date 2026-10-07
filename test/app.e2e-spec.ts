@@ -26,4 +26,11 @@ describe('AppController (e2e)', () => {
   afterEach(async () => {
     await app.close();
   });
+  it('/health (GET) is public and not cached', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect('Cache-Control', 'no-store')
+      .expect({ status: 'ok' });
+  });
 });

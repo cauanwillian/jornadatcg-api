@@ -25,6 +25,7 @@ const deadline = new Date(now.getTime() + 30 * 60_000);
 const base: Payment = {
   id: paymentId,
   orderId,
+  shipmentId: null,
   provider: 'asaas:sandbox',
   method: 'PIX',
   status: 'PENDING',

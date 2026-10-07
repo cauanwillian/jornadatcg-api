@@ -39,7 +39,10 @@ function token(
 
 describe('Authentication HTTP', () => {
   let app: INestApplication<App>;
-  const db = { user: { create: vi.fn(), findUnique: vi.fn() } };
+  const db = {
+    refreshToken: { create: vi.fn() },
+    user: { create: vi.fn(), findUnique: vi.fn() },
+  };
   const passwords = { hash: vi.fn(), verify: vi.fn() };
 
   beforeEach(async () => {
@@ -210,7 +213,7 @@ describe('Authentication HTTP', () => {
     { issuer: 'another-issuer' },
     { audience: 'another-audience' },
     { expiresIn: -1 },
-    { expiresIn: 3600 },
+    { expiresIn: 901 },
     { algorithm: 'HS384' },
     { subject: 'not-a-uuid' },
   ] satisfies JwtSignOptions[])(

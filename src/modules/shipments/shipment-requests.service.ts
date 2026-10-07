@@ -10,8 +10,10 @@ import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { CreateShipmentInput } from './dto/create-shipment.dto.js';
 import type { AvailableItemsQuery } from './dto/available-items.dto.js';
+import { shippingPackage } from './shipping-package.js';
 
 const include = {
+  selectedQuote: true,
   items: { orderBy: { orderItemId: 'asc' }, include: { orderItem: true } },
 } satisfies Prisma.ShipmentInclude;
 type ShipmentRecord = Prisma.ShipmentGetPayload<{ include: typeof include }>;
@@ -24,6 +26,23 @@ const dto = (row: ShipmentRecord) => ({
     row.shippingMethod === 'TO_BE_DEFINED' ? null : row.shippingCost.toFixed(2),
   address: row.addressSnapshot,
   trackingCode: row.trackingCode,
+  selectedQuoteId: row.selectedQuoteId ?? null,
+  shippingPaidAt: row.shippingPaidAt?.toISOString() ?? null,
+  packedAt: row.packedAt?.toISOString() ?? null,
+  shippedAt: row.shippedAt?.toISOString() ?? null,
+  deliveredAt: row.deliveredAt?.toISOString() ?? null,
+  quote: row.selectedQuote
+    ? {
+        id: row.selectedQuote.id,
+        provider: row.selectedQuote.provider,
+        serviceName: row.selectedQuote.serviceName,
+        carrier: row.selectedQuote.carrier,
+        amount: row.selectedQuote.amount.toFixed(2),
+        deliveryDays: row.selectedQuote.deliveryDays,
+        expiresAt: row.selectedQuote.expiresAt.toISOString(),
+        package: row.selectedQuote.packageSnapshot,
+      }
+    : null,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
   items: row.items.map(({ orderItem, quantity }) => ({
@@ -45,6 +64,7 @@ export class ShipmentRequestsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   create(userId: string, key: string, body: CreateShipmentInput) {
+    shippingPackage(body.items.reduce((sum, item) => sum + item.quantity, 0));
     return this.transaction(async (tx) => {
       // Use the request UUID as the shipment primary key: durable replay without a schema change.
       const existing = await tx.shipment.findUnique({
@@ -176,12 +196,20 @@ export class ShipmentRequestsService {
     return this.transaction(async (tx) => {
       const row = await this.owned(tx, userId, id);
       if (row.status === 'CANCELLED') return dto(row);
+      const active = await tx.payment.findFirst({
+        where: {
+          shipmentId: id,
+          status: { in: ['PENDING', 'PAID', 'REFUNDED'] },
+        },
+        select: { id: true },
+      });
       if (
         row.status !== 'PENDING' ||
-        row.shippingMethod !== 'TO_BE_DEFINED' ||
+        active ||
+        row.shippingPaidAt ||
         row.providerShipmentId ||
         row.trackingCode ||
-        !row.shippingCost.isZero()
+        (row.shippingMethod !== 'TO_BE_DEFINED' && !row.selectedQuoteId)
       )
         throw new ConflictException(
           'Esta solicitação não pode mais ser cancelada pelo cliente.',

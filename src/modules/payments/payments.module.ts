@@ -12,10 +12,15 @@ import {
 import { AsaasReconciliationWorker } from './asaas-reconciliation.worker.js';
 import { CreatePixPipe } from './dto/create-pix.dto.js';
 import { OrderReservationConfig } from '../orders/order-reservation.config.js';
+import { ShipmentPaymentsController } from './shipment-payments.controller.js';
 
 @Module({
   imports: [DatabaseModule, AuthModule],
-  controllers: [PaymentsController, AsaasWebhookController],
+  controllers: [
+    PaymentsController,
+    AsaasWebhookController,
+    ShipmentPaymentsController,
+  ],
   providers: [
     PaymentsService,
     AsaasPixService,

@@ -3,6 +3,7 @@ import type { Prisma } from '../../../generated/prisma/client.js';
 export const paymentSelect = {
   id: true,
   orderId: true,
+  shipmentId: true,
   provider: true,
   method: true,
   status: true,

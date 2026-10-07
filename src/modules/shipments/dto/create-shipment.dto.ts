@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { PipeTransform } from '@nestjs/common';
+import { shippingPackage } from '../shipping-package.js';
 
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -60,6 +61,7 @@ export class CreateShipmentPipe implements PipeTransform {
       .sort((a, b) => a.orderItemId.localeCompare(b.orderItemId));
     if (new Set(items.map((item) => item.orderItemId)).size !== items.length)
       return fail();
+    shippingPackage(items.reduce((sum, item) => sum + item.quantity, 0));
     return { addressId: body.addressId.toLowerCase(), items };
   }
 }

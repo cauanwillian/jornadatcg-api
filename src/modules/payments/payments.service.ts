@@ -15,7 +15,8 @@ import { paymentSelect, toPaymentDto } from './dto/payment-result.dto.js';
 export interface VerifiedPayment {
   provider: string;
   providerPaymentId: string;
-  orderId: string;
+  orderId: string | null;
+  shipmentId?: string | null;
   amount: string;
   currency: 'BRL';
   status: 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED';
@@ -72,16 +73,87 @@ export class PaymentsService {
               items: { select: { productId: true, quantity: true } },
             },
           },
+          shipment: {
+            select: {
+              id: true,
+              status: true,
+              shippingCost: true,
+              shippingPaidAt: true,
+            },
+          },
         },
       });
       if (
         !payment ||
         payment.provider !== event.provider ||
-        payment.orderId !== event.orderId
+        payment.orderId !== event.orderId ||
+        (payment.shipmentId ?? null) !== (event.shipmentId ?? null)
       ) {
         throw new NotFoundException('Pagamento não encontrado.');
       }
-      const { order, ...record } = payment;
+      const { order, shipment, ...record } = payment;
+      if (payment.shipmentId) {
+        if (
+          !shipment ||
+          !payment.amount.equals(event.amount) ||
+          !shipment.shippingCost.equals(event.amount)
+        )
+          throw new ConflictException(
+            'Valor do pagamento não corresponde ao frete.',
+          );
+        if (payment.status === 'PAID' || payment.status === 'REFUNDED')
+          return toPaymentDto(record);
+        if (payment.status !== 'PENDING') {
+          if (event.status === 'PAID')
+            throw new ConflictException(
+              'Frete pago após encerramento. Necessária revisão financeira.',
+            );
+          return toPaymentDto(record);
+        }
+        if (event.status === 'PAID') {
+          const other = await tx.payment.findFirst({
+            where: {
+              shipmentId: shipment.id,
+              id: { not: payment.id },
+              status: { in: ['PAID', 'REFUNDED'] },
+            },
+          });
+          if (other)
+            throw new ConflictException(
+              'Frete já possui pagamento confirmado.',
+            );
+          const changed = await tx.shipment.updateMany({
+            where: { id: shipment.id, status: 'PENDING', shippingPaidAt: null },
+            data: { status: 'PREPARING', shippingPaidAt: event.paidAt },
+          });
+          if (changed.count !== 1)
+            throw new ConflictException(
+              'Envio encerrado ou alterado. Necessária revisão financeira.',
+            );
+        }
+        const changed = await tx.payment.updateMany({
+          where: { id: payment.id, status: 'PENDING' },
+          data: {
+            status: event.status,
+            ...(event.status === 'PAID'
+              ? { paidAt: event.paidAt }
+              : event.status === 'FAILED'
+                ? { failedAt: new Date() }
+                : {}),
+          },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException('Pagamento de frete alterado.');
+        // Freight settlement never changes purchase payments or inventory.
+        return toPaymentDto(
+          await tx.payment.findUniqueOrThrow({
+            where: { id: payment.id },
+            select: paymentSelect,
+          }),
+        );
+      }
+      if (!order)
+        throw new ConflictException('Pedido do pagamento não encontrado.');
       if (
         !payment.amount.equals(event.amount) ||
         !order.total.equals(event.amount)

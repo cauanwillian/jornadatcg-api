@@ -101,62 +101,73 @@ export class AsaasPixService {
         });
         return { payment, user: order.user };
       });
-      const payment = intent.payment;
-      if (payment.status !== 'PENDING') return this.presentation(payment);
-      if (!payment.providerPaymentId && !payment.providerRequestStartedAt) {
-        if (payment.expiresAt && payment.expiresAt <= new Date())
-          throw new ConflictException('Prazo de pagamento expirado.');
-        const customer =
-          payment.providerCustomerId ??
-          (await this.asaas.customer(intent.user, body.cpf));
-        await this.prisma.payment.updateMany({
-          where: {
-            id: payment.id,
-            status: 'PENDING',
-            providerRequestStartedAt: null,
-            providerCustomerId: null,
-          },
-          data: { providerCustomerId: customer },
-        });
-        // Commit the send marker before HTTP. Ambiguous failures may only recover
-        // by externalReference, never by blindly issuing another payment POST.
-        const claimed = await this.prisma.payment.updateMany({
-          where: {
-            id: payment.id,
-            status: 'PENDING',
-            providerRequestStartedAt: null,
-            providerCustomerId: customer,
-            expiresAt: { gt: new Date() },
-          },
-          data: { providerRequestStartedAt: new Date() },
-        });
-        if (claimed.count === 1) {
-          let remote: AsaasPayment;
-          try {
-            remote = await this.asaas.createPix({
-              customer,
-              amount: payment.amount.toFixed(2),
-              reference: payment.id,
-              expiresAt: payment.expiresAt!,
-            });
-          } catch (error) {
-            if (error instanceof AsaasRejectedRequest) {
-              await this.prisma.payment.updateMany({
-                where: {
-                  id: payment.id,
-                  providerPaymentId: null,
-                  status: 'PENDING',
-                },
-                data: { providerRequestStartedAt: null },
-              });
-            }
-            throw error;
-          }
-          await this.acceptRemote(remote, payment.id);
-        }
-      }
-      return this.presentation(await this.reconcileOne(payment.id));
+      return this.issue(intent, body);
     });
+  }
+
+  private async issue(
+    intent: {
+      payment: Intent;
+      user: { id: string; name: string; email: string };
+    },
+    body: CreatePixDto,
+  ) {
+    const payment = intent.payment;
+    if (payment.status !== 'PENDING') return this.presentation(payment);
+    if (!payment.providerPaymentId && !payment.providerRequestStartedAt) {
+      if (payment.expiresAt && payment.expiresAt <= new Date())
+        throw new ConflictException('Prazo de pagamento expirado.');
+      const customer =
+        payment.providerCustomerId ??
+        (await this.asaas.customer(intent.user, body.cpf));
+      await this.prisma.payment.updateMany({
+        where: {
+          id: payment.id,
+          status: 'PENDING',
+          providerRequestStartedAt: null,
+          providerCustomerId: null,
+        },
+        data: { providerCustomerId: customer },
+      });
+      // Commit the send marker before HTTP. Ambiguous failures may only recover
+      // by externalReference, never by blindly issuing another payment POST.
+      const claimed = await this.prisma.payment.updateMany({
+        where: {
+          id: payment.id,
+          status: 'PENDING',
+          providerRequestStartedAt: null,
+          providerCustomerId: customer,
+          expiresAt: { gt: new Date() },
+        },
+        data: { providerRequestStartedAt: new Date() },
+      });
+      if (claimed.count === 1) {
+        let remote: AsaasPayment;
+        try {
+          remote = await this.asaas.createPix({
+            customer,
+            amount: payment.amount.toFixed(2),
+            reference: payment.id,
+            expiresAt: payment.expiresAt!,
+            ...(payment.shipmentId ? { description: 'Frete JornadaTCG' } : {}),
+          });
+        } catch (error) {
+          if (error instanceof AsaasRejectedRequest) {
+            await this.prisma.payment.updateMany({
+              where: {
+                id: payment.id,
+                providerPaymentId: null,
+                status: 'PENDING',
+              },
+              data: { providerRequestStartedAt: null },
+            });
+          }
+          throw error;
+        }
+        await this.acceptRemote(remote, payment.id);
+      }
+    }
+    return this.presentation(await this.reconcileOne(payment.id));
   }
 
   get(userId: string, orderId: string) {
@@ -168,6 +179,128 @@ export class AsaasPixService {
       });
       if (!payment)
         throw new NotFoundException('Pagamento Pix não encontrado.');
+      return this.presentation(await this.reconcileOne(payment.id));
+    });
+  }
+
+  createShipment(userId: string, shipmentId: string, body: CreatePixDto) {
+    return this.protect(async () => {
+      this.asaas.assertConfigured();
+      const provider = this.asaas.provider;
+      const intent = await this.transaction(async (tx) => {
+        const shipment = await tx.shipment.findFirst({
+          where: { id: shipmentId, userId },
+          include: {
+            selectedQuote: true,
+            user: { select: { id: true, name: true, email: true, cpf: true } },
+            items: {
+              select: {
+                orderItem: {
+                  select: {
+                    order: {
+                      select: {
+                        status: true,
+                        payments: { select: { status: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!shipment) throw new NotFoundException('Envio não encontrado.');
+        if (shipment.user.cpf && shipment.user.cpf !== body.cpf)
+          throw new ConflictException(
+            'CPF diferente do cadastro. Contate o suporte para corrigir.',
+          );
+        const existing = await tx.payment.findUnique({
+          where: { shipmentId_provider: { shipmentId, provider } },
+          select: internalSelect,
+        });
+        if (existing) return { payment: existing, user: shipment.user };
+        const quote = shipment.selectedQuote;
+        if (
+          shipment.status !== 'PENDING' ||
+          shipment.shippingPaidAt ||
+          !quote ||
+          quote.shipmentId !== shipmentId ||
+          quote.expiresAt <= new Date() ||
+          !quote.amount.equals(shipment.shippingCost)
+        )
+          throw new ConflictException(
+            'Selecione uma cotação válida antes de pagar o frete.',
+          );
+        if (
+          provider === 'asaas:production' &&
+          quote.provider.endsWith(':sandbox')
+        )
+          throw new ConflictException(
+            'Não é possível cobrar em produção uma cotação de teste.',
+          );
+        if (
+          shipment.items.some(
+            (item) =>
+              ![
+                'PAID',
+                'PREPARING',
+                'READY_TO_SHIP',
+                'SHIPPED',
+                'DELIVERED',
+              ].includes(item.orderItem.order.status) ||
+              !item.orderItem.order.payments.some((p) => p.status === 'PAID') ||
+              item.orderItem.order.payments.some(
+                (p) => p.status === 'REFUNDED',
+              ),
+          )
+        )
+          throw new ConflictException(
+            'Compra vinculada ao envio exige revisão.',
+          );
+        if (
+          await tx.payment.findFirst({
+            where: { shipmentId },
+            select: { id: true },
+          })
+        )
+          throw new ConflictException(
+            'Envio já possui cobrança em outro ambiente.',
+          );
+        if (!shipment.user.cpf)
+          await tx.user.update({
+            where: { id: userId },
+            data: { cpf: body.cpf },
+            select: { id: true },
+          });
+        const payment = await tx.payment.create({
+          data: {
+            shipmentId,
+            provider,
+            method: 'PIX',
+            amount: quote.amount,
+            expiresAt: quote.expiresAt,
+          },
+          select: internalSelect,
+        });
+        return { payment, user: shipment.user };
+      });
+      return this.issue(intent, body);
+    });
+  }
+
+  getShipment(userId: string, shipmentId: string) {
+    return this.protect(async () => {
+      this.asaas.assertConfigured();
+      const payment = await this.prisma.payment.findFirst({
+        where: {
+          shipmentId,
+          provider: this.asaas.provider,
+          shipment: { userId },
+        },
+        select: { id: true },
+      });
+      if (!payment)
+        throw new NotFoundException('Pagamento do frete não encontrado.');
       return this.presentation(await this.reconcileOne(payment.id));
     });
   }
@@ -270,6 +403,7 @@ export class AsaasPixService {
         provider: payment.provider,
         providerPaymentId: remote.id,
         orderId: payment.orderId,
+        shipmentId: payment.shipmentId,
         amount: remote.amount,
         currency: 'BRL',
         status: 'PAID',
@@ -296,6 +430,7 @@ export class AsaasPixService {
         provider: payment.provider,
         providerPaymentId: remote.id,
         orderId: payment.orderId,
+        shipmentId: payment.shipmentId,
         amount: remote.amount,
         currency: 'BRL',
         status: 'CANCELLED',

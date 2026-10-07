@@ -50,6 +50,7 @@ const record = () => ({
 describe('Shipment requests HTTP', () => {
   let app: INestApplication<App>;
   const db = {
+    payment: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
     address: { findFirst: vi.fn() },
     orderItem: { findMany: vi.fn() },
@@ -192,6 +193,25 @@ describe('Shipment requests HTTP', () => {
   it('cancels pending requests without deleting allocations', async () => {
     const response = await cancel().expect(200);
     expect(response.body.status).toBe('CANCELLED');
+  });
+  it('rejects over 70 cards per request', async () => {
+    await create({
+      ...body,
+      items: [{ orderItemId: itemId, quantity: 71 }],
+    }).expect(400);
+  });
+  it('blocks cancellation with a pending freight charge', async () => {
+    db.payment.findFirst.mockResolvedValue({ id });
+    await cancel().expect(409);
+  });
+  it('allows cancelling a selected quote without a payment', async () => {
+    db.shipment.findFirst.mockResolvedValue({
+      ...record(),
+      selectedQuoteId: id,
+      shippingMethod: '1',
+      shippingCost: new Prisma.Decimal(10),
+    });
+    await cancel().expect(200);
   });
   it('replays cancellation', async () => {
     db.shipment.findFirst.mockResolvedValue({

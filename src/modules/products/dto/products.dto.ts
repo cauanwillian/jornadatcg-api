@@ -10,6 +10,8 @@ export interface CreateProductDto {
   price: string;
   observation?: string | null;
   active?: boolean;
+  featured?: boolean;
+  featuredOrder?: number;
   availableQuantity: number;
 }
 export type UpdateProductDto = Partial<
@@ -84,6 +86,8 @@ function product(
     'price',
     'observation',
     'active',
+    'featured',
+    'featuredOrder',
   ];
   const body = object(value, partial ? keys : [...keys, 'availableQuantity']);
   if (partial && Object.keys(body).length === 0)
@@ -128,6 +132,14 @@ function product(
       body.availableQuantity === undefined ? 0 : body.availableQuantity,
       'availableQuantity',
     );
+  if (body.featured !== undefined) {
+    if (typeof body.featured !== 'boolean')
+      invalid('featured deve ser booleano.');
+    result.featured = body.featured;
+  }
+  if (body.featuredOrder !== undefined) {
+    result.featuredOrder = quantity(body.featuredOrder, 'featuredOrder');
+  }
   return result;
 }
 

@@ -142,6 +142,7 @@ export class AsaasService {
     amount: string;
     reference: string;
     expiresAt: Date;
+    description?: string;
   }): Promise<AsaasPayment> {
     const dueDate = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Sao_Paulo',
@@ -156,7 +157,7 @@ export class AsaasService {
         value: Number(input.amount),
         dueDate,
         externalReference: input.reference,
-        description: 'Compra JornadaTCG',
+        description: input.description ?? 'Compra JornadaTCG',
         fine: { value: 0 },
         interest: { value: 0 },
       }),

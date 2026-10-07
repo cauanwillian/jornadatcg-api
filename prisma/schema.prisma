@@ -177,6 +177,8 @@ model Product {
   price       Decimal @db.Decimal(12, 2)
   observation String? @db.Text
   active      Boolean @default(true)
+  featured Boolean @default(false)
+  featuredOrder Int @default(0)
 
   inventory Inventory?
 
@@ -187,6 +189,7 @@ model Product {
   updatedAt DateTime @updatedAt
 
   @@index([cardId])
+  @@index([featured, featuredOrder])
   @@index([conditionId])
   @@index([languageId])
   @@index([categoryId])
@@ -226,6 +229,7 @@ model User {
 
   role UserRole @default(CUSTOMER)
 
+  refreshTokens RefreshToken[]
   addresses Address[]
   cart      Cart?
   orders    Order[]
@@ -379,8 +383,10 @@ model OrderItem {
 model Payment {
   id String @id @default(uuid()) @db.Uuid
 
-  orderId String @db.Uuid
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String? @db.Uuid
+  order   Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shipmentId String? @db.Uuid
+  shipment Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
 
   provider          String
   providerPaymentId String? @unique
@@ -403,6 +409,7 @@ model Payment {
   @@index([status])
   @@map("payments")
   @@unique([orderId, provider])
+  @@unique([shipmentId, provider])
 }
 
 // ======================================================
@@ -478,6 +485,14 @@ model Shipment {
   shippingCost Decimal @default(0) @db.Decimal(12, 2)
 
   addressSnapshot Json?
+  selectedQuoteId String? @unique @db.Uuid
+  selectedQuote ShippingQuote? @relation("SelectedQuote", fields: [selectedQuoteId], references: [id], onDelete: Restrict)
+  quotes ShippingQuote[] @relation("ShipmentQuotes")
+  payments Payment[]
+  shippingPaidAt DateTime?
+  packedAt DateTime?
+  packedById String? @db.Uuid
+  label ShipmentLabel?
 
   items ShipmentItem[]
 
@@ -490,6 +505,45 @@ model Shipment {
   @@index([status])
   @@index([trackingCode])
   @@map("shipments")
+}
+
+model ShippingQuote {
+  id String @id @default(uuid()) @db.Uuid
+  shipmentId String @db.Uuid
+  shipment Shipment @relation("ShipmentQuotes", fields: [shipmentId], references: [id], onDelete: Cascade)
+  selectedBy Shipment? @relation("SelectedQuote")
+  provider String
+  serviceCode String
+  serviceName String
+  carrier String
+  amount Decimal @db.Decimal(12, 2)
+  deliveryDays Int
+  packageSnapshot Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([shipmentId, expiresAt])
+  @@map("shipping_quotes")
+}
+
+model ShipmentLabel {
+  id String @id @default(uuid()) @db.Uuid
+  shipmentId String @unique @db.Uuid
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  provider String
+  requestedById String @db.Uuid
+  requestSnapshot Json
+  remoteId String? @unique @db.Uuid
+  status String @default("INTENT")
+  cost Decimal? @db.Decimal(12, 2)
+  createStartedAt DateTime?
+  checkoutStartedAt DateTime?
+  generateStartedAt DateTime?
+  generatedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("shipment_labels")
 }
 
 model ShipmentItem {
@@ -540,4 +594,32 @@ model Invoice {
 
   @@index([status])
   @@map("invoices")
+}
+
+model RefreshToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId String @db.Uuid
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Banner {
+  id String @id @default(uuid()) @db.Uuid
+  title String @db.VarChar(120)
+  link String? @db.VarChar(500)
+  active Boolean @default(false)
+  sortOrder Int @default(0)
+  image Bytes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([active, sortOrder])
+  @@map("banners")
 }
