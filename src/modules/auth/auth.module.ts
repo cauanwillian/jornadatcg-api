@@ -10,6 +10,13 @@ import { PasswordService } from './password.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { AdminGuard } from './guards/admin.guard.js';
 import { LoginBodyPipe, RegisterBodyPipe } from './dto/auth.dto.js';
+import { PasswordRecoveryController } from './password-recovery.controller.js';
+import { PasswordRecoveryService } from './password-recovery.service.js';
+import { PasswordResetEmailService } from './password-reset-email.service.js';
+import {
+  ForgotPasswordBodyPipe,
+  ResetPasswordBodyPipe,
+} from './dto/password-recovery.dto.js';
 
 @Module({
   imports: [
@@ -17,7 +24,7 @@ import { LoginBodyPipe, RegisterBodyPipe } from './dto/auth.dto.js';
     JwtModule.register({}),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 10 }]),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, PasswordRecoveryController],
   providers: [
     RefreshSessionService,
     AuthService,
@@ -28,6 +35,10 @@ import { LoginBodyPipe, RegisterBodyPipe } from './dto/auth.dto.js';
     ThrottlerGuard,
     LoginBodyPipe,
     RegisterBodyPipe,
+    PasswordRecoveryService,
+    PasswordResetEmailService,
+    ForgotPasswordBodyPipe,
+    ResetPasswordBodyPipe,
   ],
   exports: [JwtAuthGuard, AdminGuard, AuthService, AuthTokenService],
 })

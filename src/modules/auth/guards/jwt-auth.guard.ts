@@ -20,8 +20,11 @@ export class JwtAuthGuard implements CanActivate {
         : null;
     if (!match)
       throw new UnauthorizedException('Informe um token Bearer válido.');
-    const id = await this.tokens.verify(match[1]);
-    request.user = await this.auth.currentUser(id);
+    const claims = await this.tokens.verifyClaims(match[1]);
+    request.user = await this.auth.currentUser(
+      claims.userId,
+      claims.authVersion,
+    );
     return true;
   }
 }

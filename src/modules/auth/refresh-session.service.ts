@@ -31,16 +31,27 @@ export class RefreshSessionService {
       );
     }
   }
-  issue(userId: string) {
+  issue(userId: string, expectedVersion = 0) {
     return this.safe(async () => {
       const token = randomBytes(48).toString('base64url');
-      await this.db.refreshToken.create({
-        data: {
-          userId,
-          familyId: randomUUID(),
-          tokenHash: hash(token),
-          expiresAt: new Date(Date.now() + this.maxAge),
-        },
+      await this.db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 1))::text`;
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: { authVersion: true },
+        });
+        if (!user || (user.authVersion ?? 0) !== expectedVersion)
+          throw new UnauthorizedException(
+            'Sessão inválida. Faça login novamente.',
+          );
+        await tx.refreshToken.create({
+          data: {
+            userId,
+            familyId: randomUUID(),
+            tokenHash: hash(token),
+            expiresAt: new Date(Date.now() + this.maxAge),
+          },
+        });
       });
       return token;
     });
@@ -56,6 +67,8 @@ export class RefreshSessionService {
         throw new UnauthorizedException('Sessão inválida ou expirada.');
       const next = randomBytes(48).toString('base64url');
       const result = await this.db.$transaction(async (tx) => {
+        // Password reset and refresh issuance share this user-level lock.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${row.userId}, 1))::text`;
         // Serialize refresh and logout across all API instances for this session.
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${row.familyId}, 0))::text`;
         const claimed = await tx.refreshToken.updateMany({
@@ -76,11 +89,12 @@ export class RefreshSessionService {
         }
         const user = await tx.user.findUnique({
           where: { id: row.userId },
-          select: publicUserSelect,
+          select: { ...publicUserSelect, authVersion: true },
         });
         if (!user)
           throw new UnauthorizedException('Sessão inválida ou expirada.');
-        const accessToken = await this.tokens.sign(user.id);
+        const { authVersion, ...profile } = user;
+        const accessToken = await this.tokens.sign(user.id, authVersion);
         await tx.refreshToken.create({
           data: {
             userId: user.id,
@@ -93,7 +107,7 @@ export class RefreshSessionService {
           accessToken,
           tokenType: 'Bearer',
           expiresIn: this.tokens.expiresIn,
-          user,
+          user: profile,
         };
       });
       if (!result) {

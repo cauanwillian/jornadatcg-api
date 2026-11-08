@@ -68,6 +68,7 @@ export class PaymentsService {
           order: {
             select: {
               id: true,
+              orderNumber: true,
               status: true,
               total: true,
               items: { select: { productId: true, quantity: true } },
@@ -195,7 +196,11 @@ export class PaymentsService {
         });
         if (changed.count !== 1)
           throw new ConflictException('Pedido alterado durante a confirmação.');
-        await moveReservedStock(tx, order.items, 'soldQuantity');
+        await moveReservedStock(tx, order.items, 'soldQuantity', {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          type: 'PAYMENT_CONFIRMED',
+        });
       }
       const changed = await tx.payment.updateMany({
         where: { id: payment.id, status: 'PENDING' },
@@ -229,7 +234,11 @@ export class PaymentsService {
             throw new ConflictException(
               'Pedido alterado durante o cancelamento.',
             );
-          await moveReservedStock(tx, order.items, 'availableQuantity');
+          await moveReservedStock(tx, order.items, 'availableQuantity', {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            type: 'PAYMENT_RELEASED',
+          });
         }
       }
       const updated = await tx.payment.findUniqueOrThrow({

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
-import { ScrydexService } from './integrations/scrydex.service.js';
+import { TcggoService } from './integrations/tcggo.service.js';
 import { localCardSelect, toLocalCardDto } from './dto/local-card.dto.js';
 import type { CardsPageDto, LocalCardDto } from './dto/local-card.dto.js';
 import type { ListCardsDto } from './dto/list-cards.dto.js';
@@ -17,12 +17,22 @@ import type { ListCardsDto } from './dto/list-cards.dto.js';
 export class CardsCatalogService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(ScrydexService) private readonly scrydex: ScrydexService,
+    @Inject(TcggoService) private readonly tcggo: TcggoService,
   ) {}
 
   async importCard(externalId: string): Promise<LocalCardDto> {
+    // Existing records remain usable even when their original provider is retired.
+    try {
+      const existing = await this.prisma.card.findUnique({
+        where: { externalId },
+        select: localCardSelect,
+      });
+      if (existing) return toLocalCardDto(existing);
+    } catch (error) {
+      this.rethrowDatabaseError(error);
+    }
     // Remote I/O and validation must finish before acquiring database locks.
-    const source = await this.scrydex.getById(externalId);
+    const source = await this.tcggo.getById(externalId);
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const card = await this.prisma.$transaction(

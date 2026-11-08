@@ -31,7 +31,11 @@ describe('Refresh sessions', () => {
       revokedAt: null,
     });
     db.refreshToken.updateMany.mockResolvedValue({ count: 1 });
-    db.user.findUnique.mockResolvedValue({ id: 'user', role: 'CUSTOMER' });
+    db.user.findUnique.mockResolvedValue({
+      id: 'user',
+      role: 'CUSTOMER',
+      authVersion: 0,
+    });
     tokens.sign.mockResolvedValue('access');
     service = new RefreshSessionService(
       db as unknown as PrismaService,
@@ -63,6 +67,31 @@ describe('Refresh sessions', () => {
     expect(db.refreshToken.create.mock.calls[0][0].data.familyId).toBe(
       'family',
     );
+  });
+  it('does not issue a refresh session from a login verified before password recovery', async () => {
+    db.user.findUnique.mockResolvedValue({ authVersion: 1 });
+    await expect(service.issue('user', 0)).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(db.refreshToken.create).not.toHaveBeenCalled();
+  });
+  it('issues a session for the matching credential version under the shared user lock', async () => {
+    db.user.findUnique.mockResolvedValue({ authVersion: 2 });
+    await service.issue('user', 2);
+    expect(db.$queryRaw.mock.calls[0][1]).toBe('user');
+    expect(db.refreshToken.create).toHaveBeenCalledTimes(1);
+  });
+  it('uses the current credential version when rotating and hides it from the profile', async () => {
+    db.user.findUnique.mockResolvedValue({
+      id: 'user',
+      role: 'CUSTOMER',
+      authVersion: 2,
+    });
+    const result = await service.rotate(token);
+    expect(tokens.sign).toHaveBeenCalledWith('user', 2);
+    expect(result.body.user).not.toHaveProperty('authVersion');
+    expect(db.$queryRaw.mock.calls[0][1]).toBe('user');
+    expect(db.$queryRaw.mock.calls[1][1]).toBe('family');
   });
   it('revokes the family when a token is reused or loses a concurrent rotation', async () => {
     db.refreshToken.updateMany.mockResolvedValueOnce({ count: 0 });

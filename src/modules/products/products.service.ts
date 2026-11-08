@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../../database/prisma.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { productSelect, toProductDto } from './dto/product-result.dto.js';
+import { recordStockMovement } from '../inventory/record-stock-movement.js';
 import type {
   CreateProductDto,
   UpdateProductDto,
@@ -23,26 +24,31 @@ import type {
 export class ProductsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async create(input: CreateProductDto) {
+  async create(input: CreateProductDto, actorId?: string) {
     return this.transaction(async (tx) => {
       await this.validateReferences(tx, input);
       const { availableQuantity, price, ...data } = input;
-      return toProductDto(
-        await tx.product.create({
-          data: {
-            ...data,
-            price: new Prisma.Decimal(price),
-            inventory: {
-              create: {
-                availableQuantity,
-                reservedQuantity: 0,
-                soldQuantity: 0,
-              },
+      const product = await tx.product.create({
+        data: {
+          ...data,
+          price: new Prisma.Decimal(price),
+          inventory: {
+            create: {
+              availableQuantity,
+              reservedQuantity: 0,
+              soldQuantity: 0,
             },
           },
-          select: productSelect,
-        }),
-      );
+        },
+        select: productSelect,
+      });
+      await recordStockMovement(tx, {
+        productId: product.id,
+        type: 'INITIAL_STOCK',
+        actorId,
+        delta: { availableQuantity, reservedQuantity: 0, soldQuantity: 0 },
+      });
+      return toProductDto(product);
     });
   }
 
@@ -66,7 +72,7 @@ export class ProductsService {
     });
   }
 
-  async updateInventory(id: string, input: InventoryDto) {
+  async updateInventory(id: string, input: InventoryDto, actorId?: string) {
     return this.transaction(async (tx) => {
       if (
         !(await tx.product.findUnique({ where: { id }, select: { id: true } }))
@@ -84,6 +90,18 @@ export class ProductsService {
         throw new ConflictException(
           'Estoque alterado por outra operação ou não cadastrado. Consulte o produto antes de tentar novamente.',
         );
+      await recordStockMovement(tx, {
+        productId: id,
+        type: 'MANUAL_ADJUSTMENT',
+        actorId,
+        reason: input.reason,
+        delta: {
+          availableQuantity:
+            input.availableQuantity - input.expectedAvailableQuantity,
+          reservedQuantity: 0,
+          soldQuantity: 0,
+        },
+      });
       return toProductDto(
         await tx.product.findUniqueOrThrow({
           where: { id },

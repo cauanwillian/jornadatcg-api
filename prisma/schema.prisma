@@ -60,6 +60,18 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum InventoryMovementType {
+  OPENING_BALANCE
+  INITIAL_STOCK
+  MANUAL_ADJUSTMENT
+  ORDER_RESERVED
+  ORDER_CANCELLED
+  ORDER_EXPIRED
+  PAYMENT_CONFIRMED
+  PAYMENT_RELEASED
+  STOCK_RECEIPT
+}
+
 // ======================================================
 // CATÁLOGO
 // ======================================================
@@ -181,6 +193,7 @@ model Product {
   featuredOrder Int @default(0)
 
   inventory Inventory?
+  inventoryMovements InventoryMovement[]
 
   cartItems  CartItem[]
   orderItems OrderItem[]
@@ -213,6 +226,47 @@ model Inventory {
   @@map("inventories")
 }
 
+// Append-only audit of application stock changes, including immutable labels.
+model InventoryMovement {
+  id String @id @default(uuid()) @db.Uuid
+  sequence BigInt @unique @default(autoincrement())
+  productId String @db.Uuid
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderId String? @db.Uuid
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderNumber Int?
+  actorId String? @db.Uuid
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  type InventoryMovementType
+  reason String? @db.VarChar(500)
+  operationKey String? @db.Uuid
+  cardName String
+  cardNumber String
+  setName String
+  categoryName String
+  conditionName String
+  languageName String
+  availableBefore Int
+  reservedBefore Int
+  soldBefore Int
+  availableDelta Int
+  reservedDelta Int
+  soldDelta Int
+  availableAfter Int
+  reservedAfter Int
+  soldAfter Int
+  createdAt DateTime @default(now())
+
+  @@unique([productId, orderId, type])
+  @@unique([productId, operationKey])
+  @@index([productId, sequence])
+  @@index([type, sequence])
+  @@index([orderId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
+
 // ======================================================
 // USUÁRIOS
 // ======================================================
@@ -223,6 +277,7 @@ model User {
   name         String
   email        String @unique
   passwordHash String
+  authVersion  Int @default(0)
 
   cpf   String? @unique @db.VarChar(11)
   phone String? @db.VarChar(20)
@@ -230,10 +285,12 @@ model User {
   role UserRole @default(CUSTOMER)
 
   refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   addresses Address[]
   cart      Cart?
   orders    Order[]
   shipments Shipment[]
+  inventoryMovements InventoryMovement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -332,6 +389,7 @@ model Order {
   items    OrderItem[]
   payments Payment[]
   invoice  Invoice?
+  inventoryMovements InventoryMovement[]
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -594,6 +652,21 @@ model Invoice {
 
   @@index([status])
   @@map("invoices")
+}
+
+model PasswordResetToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  authVersion Int
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model RefreshToken {

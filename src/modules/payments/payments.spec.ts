@@ -46,9 +46,20 @@ const payment = {
 };
 const order = {
   id: orderId,
+  orderNumber: 42,
   status: 'PENDING_PAYMENT',
   total: new Prisma.Decimal('0.30'),
   items: [{ productId, quantity: 3 }],
+};
+type StockValues = {
+  availableQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+};
+type StockUpdate = {
+  data: Partial<
+    Record<keyof StockValues, { increment?: number; decrement?: number }>
+  >;
 };
 const event: VerifiedPayment = {
   provider: payment.provider,
@@ -73,9 +84,13 @@ describe('Payments', () => {
       findFirst: vi.fn(),
       updateMany: vi.fn(),
     },
-    inventory: { updateMany: vi.fn() },
+    inventory: { updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
+    shipment: { updateMany: vi.fn() },
     $transaction: vi.fn(),
   };
+  let stock: StockValues;
+  let committedMovements: unknown[];
   const list = (id = orderId) =>
     request(app.getHttpServer())
       .get(`/orders/${id}/payments`)
@@ -91,6 +106,8 @@ describe('Payments', () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+    stock = { availableQuantity: 7, reservedQuantity: 10, soldQuantity: 4 };
+    committedMovements = [];
     vi.stubEnv('JWT_SECRET', secret);
     db.user.findUnique.mockResolvedValue({
       id: userId,
@@ -99,8 +116,19 @@ describe('Payments', () => {
       role: 'CUSTOMER',
     });
     db.$transaction.mockImplementation(
-      (work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
-        work(db as unknown as Prisma.TransactionClient),
+      async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+        const previous = {
+          stock: { ...stock },
+          movements: committedMovements.length,
+        };
+        try {
+          return await work(db as unknown as Prisma.TransactionClient);
+        } catch (error) {
+          stock = previous.stock;
+          committedMovements.length = previous.movements;
+          throw error;
+        }
+      },
     );
     db.order.findFirst.mockResolvedValue({ id: orderId });
     db.order.updateMany.mockResolvedValue({ count: 1 });
@@ -113,7 +141,30 @@ describe('Payments', () => {
     });
     db.payment.findFirst.mockResolvedValue(null);
     db.payment.updateMany.mockResolvedValue({ count: 1 });
-    db.inventory.updateMany.mockResolvedValue({ count: 1 });
+    db.inventory.updateMany.mockImplementation(
+      async ({ data }: StockUpdate) => {
+        for (const key of Object.keys(data) as Array<keyof StockValues>)
+          stock[key] +=
+            (data[key]?.increment ?? 0) - (data[key]?.decrement ?? 0);
+        return { count: 1 };
+      },
+    );
+    db.inventory.findUniqueOrThrow.mockImplementation(async () => ({
+      ...stock,
+      product: {
+        card: { name: 'Pikachu', number: '025', set: { name: 'Base' } },
+        category: { name: 'Singles' },
+        condition: { name: 'Near Mint' },
+        language: { name: 'Português' },
+      },
+    }));
+    db.inventoryMovement.create.mockImplementation(
+      async ({ data }: { data: unknown }) => {
+        committedMovements.push(data);
+        return { id: paymentId };
+      },
+    );
+    db.shipment.updateMany.mockResolvedValue({ count: 1 });
   });
   afterEach(() => vi.unstubAllEnvs());
   afterAll(async () => {
@@ -192,6 +243,26 @@ describe('Payments', () => {
       where: { id: paymentId, status: 'PENDING' },
       data: { status: 'PAID', paidAt: date },
     });
+    expect(db.inventoryMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId,
+          type: 'PAYMENT_CONFIRMED',
+          orderId,
+          orderNumber: 42,
+          actorId: null,
+          availableBefore: 7,
+          reservedBefore: 10,
+          soldBefore: 4,
+          availableDelta: 0,
+          reservedDelta: -3,
+          soldDelta: 3,
+          availableAfter: 7,
+          reservedAfter: 7,
+          soldAfter: 7,
+        }),
+      }),
+    );
   });
   it.each(['PAID', 'FAILED', 'CANCELLED', 'EXPIRED'] as const)(
     'ignores repeated or stale %s notifications after payment',
@@ -206,6 +277,7 @@ describe('Payments', () => {
         await service.applyVerifiedPayment({ ...event, status }),
       ).toMatchObject({ status: 'PAID' });
       expect(db.inventory.updateMany).not.toHaveBeenCalled();
+      expect(db.inventoryMovement.create).not.toHaveBeenCalled();
       expect(db.order.updateMany).not.toHaveBeenCalled();
       expect(db.payment.updateMany).not.toHaveBeenCalled();
     },
@@ -229,6 +301,23 @@ describe('Payments', () => {
           },
         }),
       );
+      expect(committedMovements).toHaveLength(1);
+      expect(committedMovements[0]).toMatchObject({
+        productId,
+        type: 'PAYMENT_RELEASED',
+        orderId,
+        orderNumber: 42,
+        actorId: null,
+        availableBefore: 7,
+        reservedBefore: 10,
+        soldBefore: 4,
+        availableDelta: 3,
+        reservedDelta: -3,
+        soldDelta: 0,
+        availableAfter: 10,
+        reservedAfter: 7,
+        soldAfter: 4,
+      });
     },
   );
   it('keeps the reservation if another payment is still pending', async () => {
@@ -237,6 +326,7 @@ describe('Payments', () => {
     expect(db.payment.updateMany).toHaveBeenCalled();
     expect(db.order.updateMany).not.toHaveBeenCalled();
     expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
   it('does not release inventory on repeated terminal notifications', async () => {
     db.payment.findUnique.mockResolvedValue({
@@ -246,6 +336,7 @@ describe('Payments', () => {
     });
     await service.applyVerifiedPayment({ ...event, status: 'EXPIRED' });
     expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
   it.each(['CANCELLED', 'PAID', 'SHIPPED'])(
     'rejects late approval for an order in %s',
@@ -331,6 +422,80 @@ describe('Payments', () => {
     await expect(service.applyVerifiedPayment(event)).rejects.toBeInstanceOf(
       ConflictException,
     );
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 10,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+  });
+  it('rolls back the sale and does not confirm the payment if recording fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger details'),
+    );
+    await expect(service.applyVerifiedPayment(event)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 10,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+    expect(db.payment.updateMany).not.toHaveBeenCalled();
+  });
+  it('rolls back a release when recording its terminal payment fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger details'),
+    );
+    await expect(
+      service.applyVerifiedPayment({ ...event, status: 'EXPIRED' }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 10,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+  });
+  it('retries serialization during recording without duplicate sales', async () => {
+    db.inventoryMovement.create.mockRejectedValueOnce({ code: 'P2034' });
+    await service.applyVerifiedPayment(event);
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 7,
+      soldQuantity: 7,
+    });
+    expect(committedMovements).toHaveLength(1);
+  });
+  it('confirms freight without creating a stock movement', async () => {
+    const shipmentId = productId;
+    db.payment.findUnique.mockResolvedValue({
+      ...payment,
+      orderId: null,
+      shipmentId,
+      order: null,
+      shipment: {
+        id: shipmentId,
+        status: 'PENDING',
+        shippingCost: payment.amount,
+        shippingPaidAt: null,
+      },
+    });
+    db.payment.findUniqueOrThrow.mockResolvedValue({
+      ...payment,
+      orderId: null,
+      shipmentId,
+      status: 'PAID',
+      paidAt: date,
+    });
+    await service.applyVerifiedPayment({ ...event, orderId: null, shipmentId });
+    expect(db.shipment.updateMany).toHaveBeenCalledOnce();
+    expect(db.payment.updateMany).toHaveBeenCalledOnce();
+    expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(committedMovements).toEqual([]);
   });
   it('retries serialization conflicts and recognizes a payment completed concurrently', async () => {
     db.$transaction.mockRejectedValueOnce({ code: 'P2034' });

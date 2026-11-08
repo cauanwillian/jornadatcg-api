@@ -20,6 +20,7 @@ export type UpdateProductDto = Partial<
 export interface InventoryDto {
   availableQuantity: number;
   expectedAvailableQuantity: number;
+  reason?: string;
 }
 export interface ListProductsDto {
   page: number;
@@ -167,13 +168,30 @@ export class InventoryPipe implements PipeTransform<unknown, InventoryDto> {
     const body = object(value, [
       'availableQuantity',
       'expectedAvailableQuantity',
+      'reason',
     ]);
+    if (
+      body.reason !== undefined &&
+      (typeof body.reason !== 'string' ||
+        body.reason.trim().length < 3 ||
+        body.reason.length > 500 ||
+        Array.from(body.reason).some(
+          (character) =>
+            character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+        ))
+    )
+      throw new BadRequestException(
+        'Informe um motivo de ajuste entre 3 e 500 caracteres válidos.',
+      );
     return {
       availableQuantity: quantity(body.availableQuantity, 'availableQuantity'),
       expectedAvailableQuantity: quantity(
         body.expectedAvailableQuantity,
         'expectedAvailableQuantity',
       ),
+      ...(body.reason === undefined
+        ? {}
+        : { reason: (body.reason as string).trim() }),
     };
   }
 }

@@ -16,6 +16,7 @@ import { cartSelect, unavailableReason } from '../cart/dto/cart-result.dto.js';
 import type { CheckoutDto, OrderListQuery } from './dto/order-input.dto.js';
 import { orderSelect, toOrderDto } from './dto/order-result.dto.js';
 import { OrderReservationConfig } from './order-reservation.config.js';
+import { recordStockMovement } from '../inventory/record-stock-movement.js';
 
 const MAX_STOCK = 2147483647;
 const MAX_AMOUNT = new Prisma.Decimal('9999999999.99');
@@ -121,6 +122,19 @@ export class OrdersService {
         },
         select: orderSelect,
       });
+      for (const { product, quantity } of items) {
+        await recordStockMovement(tx, {
+          productId: product.id,
+          type: 'ORDER_RESERVED',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          delta: {
+            availableQuantity: -quantity,
+            reservedQuantity: quantity,
+            soldQuantity: 0,
+          },
+        });
+      }
       await tx.cart.update({
         where: { id: cart.id },
         data: { updatedAt: new Date() },
@@ -226,6 +240,17 @@ export class OrdersService {
           throw new ConflictException(
             'Não foi possível liberar a reserva deste pedido. Contate o suporte.',
           );
+        await recordStockMovement(tx, {
+          productId,
+          type: 'ORDER_CANCELLED',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          delta: {
+            availableQuantity: quantity,
+            reservedQuantity: -quantity,
+            soldQuantity: 0,
+          },
+        });
       }
       return toOrderDto(await this.findOwned(tx, userId, id));
     });

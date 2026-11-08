@@ -12,6 +12,7 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
 import { AddressesModule } from './modules/addresses/addresses.module.js';
 import { ShipmentsModule } from './modules/shipments/shipments.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { HealthModule } from './modules/health/health.module.js';
     PaymentsModule,
     AddressesModule,
     ShipmentsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

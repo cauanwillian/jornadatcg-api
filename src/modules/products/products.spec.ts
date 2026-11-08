@@ -74,12 +74,15 @@ describe('Administrative products HTTP', () => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
-    inventory: { updateMany: vi.fn() },
+    inventory: { updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
     category: reference(),
     condition: reference(),
     language: reference(),
     $transaction: vi.fn(),
   };
+  let stock = { availableQuantity: 5, reservedQuantity: 2, soldQuantity: 3 };
+  const movements: unknown[] = [];
   const get = (path: string) =>
     request(app.getHttpServer())
       .get(path)
@@ -103,6 +106,8 @@ describe('Administrative products HTTP', () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+    stock = { availableQuantity: 5, reservedQuantity: 2, soldQuantity: 3 };
+    movements.length = 0;
     vi.stubEnv('JWT_SECRET', secret);
     db.user.findUnique.mockResolvedValue({
       id,
@@ -111,8 +116,17 @@ describe('Administrative products HTTP', () => {
       role: 'ADMIN',
     });
     db.$transaction.mockImplementation(
-      (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
-        callback(db as unknown as Prisma.TransactionClient),
+      async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+        const before = { ...stock },
+          length = movements.length;
+        try {
+          return await callback(db as unknown as Prisma.TransactionClient);
+        } catch (error) {
+          stock = before;
+          movements.length = length;
+          throw error;
+        }
+      },
     );
     db.card.findUnique.mockResolvedValue({ id });
     for (const model of [db.category, db.condition, db.language]) {
@@ -120,13 +134,44 @@ describe('Administrative products HTTP', () => {
       model.findMany.mockResolvedValue([]);
       model.create.mockResolvedValue({ id });
     }
-    db.product.create.mockResolvedValue(product);
+    db.product.create.mockImplementation(
+      async ({ data }: { data: { inventory: { create: typeof stock } } }) => {
+        stock = { ...data.inventory.create };
+        return {
+          ...product,
+          inventory: { ...stock, updatedAt: product.updatedAt },
+        };
+      },
+    );
     db.product.update.mockResolvedValue(product);
     db.product.findUnique.mockResolvedValue(product);
-    db.product.findUniqueOrThrow.mockResolvedValue(product);
+    db.product.findUniqueOrThrow.mockImplementation(async () => ({
+      ...product,
+      inventory: { ...stock, updatedAt: product.updatedAt },
+    }));
     db.product.findMany.mockResolvedValue([product]);
     db.product.count.mockResolvedValue(1);
-    db.inventory.updateMany.mockResolvedValue({ count: 1 });
+    db.inventory.updateMany.mockImplementation(
+      async ({ data }: { data: { availableQuantity: number } }) => {
+        stock.availableQuantity = data.availableQuantity;
+        return { count: 1 };
+      },
+    );
+    db.inventory.findUniqueOrThrow.mockImplementation(async () => ({
+      ...stock,
+      product: {
+        card: product.card,
+        category: product.category,
+        condition: product.condition,
+        language: product.language,
+      },
+    }));
+    db.inventoryMovement.create.mockImplementation(
+      async ({ data }: { data: unknown }) => {
+        movements.push(data);
+        return data;
+      },
+    );
   });
   afterEach(() => vi.unstubAllEnvs());
   afterAll(async () => {
@@ -280,6 +325,90 @@ describe('Administrative products HTTP', () => {
     expect(response.body.inventory.reservedQuantity).toBe(2);
     expect(response.body.inventory.soldQuantity).toBe(3);
   });
+
+  it('records the authenticated administrator, trimmed reason and exact adjustment snapshots in the same transaction', async () => {
+    await patch(`/products/${id}/inventory`)
+      .send({
+        availableQuantity: 8,
+        expectedAvailableQuantity: 5,
+        reason: '  Contagem conferida  ',
+      })
+      .expect(200);
+    expect(db.inventoryMovement.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        productId: id,
+        actorId: id,
+        type: 'MANUAL_ADJUSTMENT',
+        reason: 'Contagem conferida',
+        orderId: null,
+        orderNumber: null,
+        cardName: 'Pikachu',
+        setName: 'Base',
+        availableBefore: 5,
+        reservedBefore: 2,
+        soldBefore: 3,
+        availableDelta: 3,
+        reservedDelta: 0,
+        soldDelta: 0,
+        availableAfter: 8,
+        reservedAfter: 2,
+        soldAfter: 3,
+      }),
+    });
+    expect(db.$transaction).toHaveBeenCalledOnce();
+  });
+
+  it('records a new zero-stock product as an initialization, never as a prior sale', async () => {
+    await post('/products')
+      .send({ ...input, availableQuantity: 0 })
+      .expect(201);
+    expect(movements).toEqual([
+      expect.objectContaining({
+        type: 'INITIAL_STOCK',
+        actorId: id,
+        availableBefore: 0,
+        availableDelta: 0,
+        availableAfter: 0,
+        reservedAfter: 0,
+        soldAfter: 0,
+      }),
+    ]);
+  });
+
+  it('does not record unchanged stock or price-only updates', async () => {
+    await patch(`/products/${id}/inventory`)
+      .send({ availableQuantity: 5, expectedAvailableQuantity: 5 })
+      .expect(200);
+    await patch(`/products/${id}`).send({ price: '12.00' }).expect(200);
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the stock adjustment when its audit insert fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger failure'),
+    );
+    const result = await patch(`/products/${id}/inventory`)
+      .send({ availableQuantity: 8, expectedAvailableQuantity: 5 })
+      .expect(503);
+    expect(stock).toEqual({
+      availableQuantity: 5,
+      reservedQuantity: 2,
+      soldQuantity: 3,
+    });
+    expect(movements).toEqual([]);
+    expect(JSON.stringify(result.body)).not.toContain('private ledger failure');
+  });
+
+  it.each(['', '  ', 'ab', 'x'.repeat(501), 'invalid\u0000reason'])(
+    'rejects invalid adjustment reason before writing (%s)',
+    async (reason) => {
+      await patch(`/products/${id}/inventory`)
+        .send({ availableQuantity: 8, expectedAvailableQuantity: 5, reason })
+        .expect(400);
+      expect(db.inventory.updateMany).not.toHaveBeenCalled();
+      expect(db.inventoryMovement.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('returns 409 instead of overwriting concurrent stock changes', async () => {
     db.inventory.updateMany.mockResolvedValue({ count: 0 });

@@ -22,53 +22,48 @@ const token = new JwtService().sign(
   },
 );
 const setId = '7e66b17f-a4de-41ae-9234-50898fe75c6f';
+const externalId = 'tcggo_3852';
 const source = {
-  id: 'base1-58',
+  id: 3852,
   name: 'Pikachu',
-  number: '58',
+  card_number: '58',
   rarity: 'Common',
-  artist: 'Mitsuhiro Arita',
-  expansion: {
-    id: 'base1',
+  artist: { name: 'Mitsuhiro Arita' },
+  episode: {
+    id: 21,
     name: 'Base',
-    series: 'Base',
-    printed_total: 102,
-    total: 102,
+    series: { name: 'Base' },
+    cards_printed_total: 102,
+    cards_total: 102,
     code: 'BS',
-    release_date: '1999/01/09',
+    released_at: '1999-01-09',
     logo: 'https://example.com/logo.png',
     symbol: 'https://example.com/symbol.png',
   },
-  images: [
-    {
-      type: 'front',
-      small: 'https://example.com/small.png',
-      large: 'https://example.com/large.png',
-    },
-  ],
+  image: 'https://example.com/card.png',
 };
 const local: LocalCardRecord = {
   id,
-  externalId: source.id,
+  externalId,
   name: source.name,
-  number: source.number,
+  number: source.card_number,
   rarity: source.rarity,
-  artist: source.artist,
-  imageSmall: source.images[0].small,
-  imageLarge: source.images[0].large,
+  artist: source.artist.name,
+  imageSmall: source.image,
+  imageLarge: source.image,
   createdAt: new Date('2026-09-24T12:00:00Z'),
   updatedAt: new Date('2026-09-24T12:00:00Z'),
   set: {
     id: setId,
-    externalId: 'base1',
+    externalId: 'tcggo_21',
     name: 'Base',
     series: 'Base',
     printedTotal: 102,
     total: 102,
     code: 'BS',
     releaseDate: new Date('1999-01-09T00:00:00Z'),
-    logoUrl: source.expansion.logo,
-    symbolUrl: source.expansion.symbol,
+    logoUrl: source.episode.logo,
+    symbolUrl: source.episode.symbol,
   },
 };
 
@@ -94,16 +89,7 @@ describe('Cards local catalog HTTP', () => {
       .post('/cards/import')
       .set('Authorization', `Bearer ${token}`);
 
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({ imports: [CardsModule] })
-      .overrideProvider(PrismaService)
-      .useValue(database)
-      .compile();
-    app = module.createNestApplication();
-    await app.init();
-  });
-
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetAllMocks();
     vi.stubEnv('JWT_SECRET', secret);
     database.user.findUnique.mockResolvedValue({
@@ -112,36 +98,35 @@ describe('Cards local catalog HTTP', () => {
       email: 'admin@example.com',
       role: 'ADMIN',
     });
-    vi.stubEnv('SCRYDEX_API_KEY', 'test-key');
-    vi.stubEnv('SCRYDEX_TEAM_ID', 'test-team');
+    vi.stubEnv('TCGGO_RAPIDAPI_KEY', 'test-key');
     vi.stubGlobal('fetch', fetchMock);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: source })));
     database.$transaction.mockImplementation(
       (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
         callback(tx as unknown as Prisma.TransactionClient),
     );
-    database.card.findUnique.mockResolvedValue(local);
+    database.card.findUnique.mockResolvedValue(null);
     tx.card.findUnique.mockResolvedValue(null);
     tx.card.create.mockResolvedValue(local);
     tx.cardSet.upsert.mockResolvedValue(local.set);
     tx.card.count.mockResolvedValue(1);
     tx.card.findMany.mockResolvedValue([local]);
+    const module = await Test.createTestingModule({ imports: [CardsModule] })
+      .overrideProvider(PrismaService)
+      .useValue(database)
+      .compile();
+    app = module.createNestApplication();
+    await app.init();
   });
-  afterEach(() => {
+  afterEach(async () => {
+    await app.close();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
-  afterAll(async () => {
-    await app.close();
-  });
 
   it('imports authoritative provider data and maps set fields in one transaction', async () => {
-    const response = await importRequest()
-      .send({ externalId: source.id })
-      .expect(200);
-    expect((fetchMock.mock.calls[0][0] as URL).pathname).toBe(
-      '/pokemon/v1/cards/base1-58',
-    );
+    const response = await importRequest().send({ externalId }).expect(200);
+    expect((fetchMock.mock.calls[0][0] as URL).pathname).toBe('/cards/3852');
     expect(fetchMock.mock.invocationCallOrder[0]).toBeLessThan(
       database.$transaction.mock.invocationCallOrder[0],
     );
@@ -153,39 +138,39 @@ describe('Cards local catalog HTTP', () => {
     });
     expect(tx.cardSet.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { externalId: 'base1' },
+        where: { externalId: 'tcggo_21' },
         update: {},
         create: {
-          externalId: 'base1',
+          externalId: 'tcggo_21',
           name: 'Base',
           series: 'Base',
           code: 'BS',
           printedTotal: 102,
           total: 102,
           releaseDate: new Date('1999-01-09T00:00:00Z'),
-          logoUrl: source.expansion.logo,
-          symbolUrl: source.expansion.symbol,
+          logoUrl: source.episode.logo,
+          symbolUrl: source.episode.symbol,
         },
       }),
     );
     expect(tx.card.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          externalId: source.id,
+          externalId,
           name: source.name,
-          number: source.number,
+          number: source.card_number,
           rarity: source.rarity,
-          artist: source.artist,
-          imageSmall: source.images[0].small,
-          imageLarge: source.images[0].large,
+          artist: source.artist.name,
+          imageSmall: source.image,
+          imageLarge: source.image,
           setId,
         },
       }),
     );
     expect(response.body).toMatchObject({
       id,
-      externalId: source.id,
-      images: { small: source.images[0].small, large: source.images[0].large },
+      externalId,
+      images: { small: source.image, large: source.image },
       set: { id: setId, releaseDate: '1999-01-09' },
     });
     expect(response.body).not.toHaveProperty('metadata');
@@ -193,21 +178,83 @@ describe('Cards local catalog HTTP', () => {
     expect(response.body).not.toHaveProperty('imageSmall');
   });
 
-  it('returns the existing card without updating or creating records', async () => {
+  it('rechecks the local card after remote I/O before creating records', async () => {
     tx.card.findUnique.mockResolvedValueOnce(local);
-    const response = await importRequest()
-      .send({ externalId: source.id })
-      .expect(200);
+    const response = await importRequest().send({ externalId }).expect(200);
     expect(response.body.id).toBe(id);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(tx.cardSet.upsert).not.toHaveBeenCalled();
     expect(tx.card.create).not.toHaveBeenCalled();
+  });
+
+  it('persists only the collector number when the provider supplies the complete printed code', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ data: { ...source, card_number: '58/102' } }),
+        {
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    await importRequest().send({ externalId }).expect(200);
+    expect(tx.card.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ number: '58' }),
+      }),
+    );
+    expect(tx.cardSet.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ printedTotal: 102 }),
+      }),
+    );
+  });
+
+  it('returns a stored card without consulting the provider or starting a transaction', async () => {
+    database.card.findUnique.mockResolvedValue(local);
+    await importRequest().send({ externalId }).expect(200);
+    expect(database.card.findUnique).toHaveBeenCalledWith({
+      where: { externalId },
+      select: expect.any(Object),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('reuses a legacy Scrydex card without credentials and preserves its identifiers', async () => {
+    vi.stubEnv('TCGGO_RAPIDAPI_KEY', '');
+    const legacy = {
+      ...local,
+      externalId: 'base1-58',
+      set: { ...local.set, externalId: 'base1' },
+    };
+    database.card.findUnique.mockResolvedValue(legacy);
+    const response = await importRequest()
+      .send({ externalId: legacy.externalId })
+      .expect(200);
+    expect(response.body).toMatchObject({
+      id,
+      externalId: 'base1-58',
+      set: { id: setId, externalId: 'base1' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes a failed initial local lookup before consulting the provider', async () => {
+    database.card.findUnique.mockRejectedValue(
+      new Error('secret database URL'),
+    );
+    const response = await importRequest().send({ externalId }).expect(503);
+    expect(response.text).not.toContain('secret');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects a different externalId occupying the same set and number', async () => {
     tx.card.findUnique
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id });
-    await importRequest().send({ externalId: source.id }).expect(409);
+    await importRequest().send({ externalId }).expect(409);
     expect(tx.card.create).not.toHaveBeenCalled();
     expect(database.$transaction).toHaveBeenCalledOnce();
   });
@@ -220,7 +267,7 @@ describe('Cards local catalog HTTP', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(local);
-      await importRequest().send({ externalId: source.id }).expect(200);
+      await importRequest().send({ externalId }).expect(200);
       expect(database.$transaction).toHaveBeenCalledTimes(2);
       expect(fetchMock).toHaveBeenCalledOnce();
     },
@@ -234,18 +281,14 @@ describe('Cards local catalog HTTP', () => {
       code,
       message: 'secret database details',
     });
-    const response = await importRequest()
-      .send({ externalId: source.id })
-      .expect(status);
+    const response = await importRequest().send({ externalId }).expect(status);
     expect(database.$transaction).toHaveBeenCalledTimes(3);
     expect(response.text).not.toContain('secret');
   });
 
   it('propagates a failed card insert out of the transaction without returning partial success', async () => {
     tx.card.create.mockRejectedValue(new Error('secret database details'));
-    const response = await importRequest()
-      .send({ externalId: source.id })
-      .expect(503);
+    const response = await importRequest().send({ externalId }).expect(503);
     expect(tx.cardSet.upsert).toHaveBeenCalledOnce();
     expect(response.text).not.toContain('secret');
     expect(response.body).not.toHaveProperty('id');
@@ -256,7 +299,7 @@ describe('Cards local catalog HTTP', () => {
     async (authorization) => {
       const req = request(app.getHttpServer()).post('/cards/import');
       if (authorization) req.set('Authorization', authorization);
-      await req.send({ externalId: source.id }).expect(401);
+      await req.send({ externalId }).expect(401);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(database.$transaction).not.toHaveBeenCalled();
     },
@@ -266,7 +309,7 @@ describe('Cards local catalog HTTP', () => {
     'disables import when token configuration is invalid',
     async (configured) => {
       vi.stubEnv('JWT_SECRET', configured);
-      await importRequest().send({ externalId: source.id }).expect(503);
+      await importRequest().send({ externalId }).expect(503);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -278,7 +321,7 @@ describe('Cards local catalog HTTP', () => {
       email: 'customer@example.com',
       role: 'CUSTOMER',
     });
-    await importRequest().send({ externalId: source.id }).expect(403);
+    await importRequest().send({ externalId }).expect(403);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(database.$transaction).not.toHaveBeenCalled();
   });
@@ -288,7 +331,7 @@ describe('Cards local catalog HTTP', () => {
     await request(app.getHttpServer())
       .post('/cards/import')
       .set('Authorization', 'Bearer old-static-token')
-      .send({ externalId: source.id })
+      .send({ externalId })
       .expect(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -300,7 +343,7 @@ describe('Cards local catalog HTTP', () => {
     { externalId: 123 },
     { externalId: ['base1-58'] },
     { externalId: 'x'.repeat(101) },
-    { externalId: source.id, name: 'Forged name' },
+    { externalId, name: 'Forged name' },
     [],
   ])('rejects invalid import body %j', async (body) => {
     await importRequest().send(body).expect(400);
@@ -319,7 +362,7 @@ describe('Cards local catalog HTTP', () => {
         new Response('private upstream details', { status: upstreamStatus }),
       );
       const response = await importRequest()
-        .send({ externalId: source.id })
+        .send({ externalId })
         .expect(status);
       expect(database.$transaction).not.toHaveBeenCalled();
       expect(response.text).not.toContain('private');
@@ -328,32 +371,32 @@ describe('Cards local catalog HTTP', () => {
 
   it('maps upstream timeout to 504 without starting a transaction', async () => {
     fetchMock.mockRejectedValue(new DOMException('timeout', 'TimeoutError'));
-    await importRequest().send({ externalId: source.id }).expect(504);
+    await importRequest().send({ externalId }).expect(504);
     expect(database.$transaction).not.toHaveBeenCalled();
   });
 
   it.each([
     {},
-    { data: { ...source, id: 'another-card' } },
+    { data: { ...source, id: 9999 } },
     {
       data: {
         ...source,
-        expansion: { ...source.expansion, release_date: '1999/02/30' },
+        episode: { ...source.episode, released_at: '1999-02-30' },
       },
     },
-    { data: { ...source, expansion: { ...source.expansion, total: '102' } } },
+    { data: { ...source, episode: { ...source.episode, cards_total: '102' } } },
     {
       data: {
         ...source,
-        expansion: { ...source.expansion, printed_total: 2147483648 },
+        episode: { ...source.episode, cards_printed_total: 2147483648 },
       },
     },
-    { data: { ...source, expansion: { ...source.expansion, logo: 42 } } },
+    { data: { ...source, episode: { ...source.episode, logo: 42 } } },
   ])(
     'rejects invalid external data before persisting (%j)',
     async (payload) => {
       fetchMock.mockResolvedValue(new Response(JSON.stringify(payload)));
-      await importRequest().send({ externalId: source.id }).expect(502);
+      await importRequest().send({ externalId }).expect(502);
       expect(database.$transaction).not.toHaveBeenCalled();
     },
   );
@@ -439,6 +482,7 @@ describe('Cards local catalog HTTP', () => {
   });
 
   it('gets a local card by UUID without calling the provider', async () => {
+    database.card.findUnique.mockResolvedValue(local);
     const response = await request(app.getHttpServer())
       .get(`/cards/${id}`)
       .expect(200);

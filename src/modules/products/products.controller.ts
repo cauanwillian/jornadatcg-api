@@ -8,11 +8,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { AdminGuard } from '../auth/guards/admin.guard.js';
 import { ProductsService } from './products.service.js';
+import type { AuthenticatedRequest } from '../auth/auth.types.js';
 import {
   CreateProductPipe,
   UpdateProductPipe,
@@ -56,8 +58,11 @@ export class ProductsController {
   }
 
   @Post()
-  create(@Body(CreateProductPipe) body: CreateProductDto) {
-    return this.products.create(body);
+  create(
+    @Req() req: AuthenticatedRequest,
+    @Body(CreateProductPipe) body: CreateProductDto,
+  ) {
+    return this.products.create(body, req.user.id);
   }
 
   @Get()
@@ -80,9 +85,10 @@ export class ProductsController {
 
   @Patch(':id/inventory')
   inventory(
+    @Req() req: AuthenticatedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body(InventoryPipe) body: InventoryDto,
   ) {
-    return this.products.updateInventory(id, body);
+    return this.products.updateInventory(id, body, req.user.id);
   }
 }

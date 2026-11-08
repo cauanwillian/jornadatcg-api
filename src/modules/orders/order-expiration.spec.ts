@@ -4,27 +4,76 @@ import type { PrismaService } from '../../database/prisma.service.js';
 import { OrderExpirationService } from './order-expiration.service.js';
 import { OrderExpirationWorker } from './order-expiration.worker.js';
 import { OrderReservationConfig } from './order-reservation.config.js';
+type StockValues = {
+  availableQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+};
+type StockUpdate = {
+  data: Partial<
+    Record<keyof StockValues, { increment?: number; decrement?: number }>
+  >;
+};
 
 describe('Order reservation expiry', () => {
   const now = new Date('2026-09-26T12:00:00Z');
   const db = {
     order: { findMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() },
-    inventory: { updateMany: vi.fn() },
+    inventory: { updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
     $transaction: vi.fn(),
   };
+  let stock: StockValues;
+  let committedMovements: unknown[];
   let service: OrderExpirationService;
   beforeEach(() => {
     vi.resetAllMocks();
+    stock = { availableQuantity: 7, reservedQuantity: 3, soldQuantity: 4 };
+    committedMovements = [];
     db.order.findMany.mockResolvedValue([{ id: 'order-1' }]);
     db.order.findFirst.mockResolvedValue({
       id: 'order-1',
+      orderNumber: 42,
       items: [{ productId: 'product-1', quantity: 3 }],
     });
     db.order.updateMany.mockResolvedValue({ count: 1 });
-    db.inventory.updateMany.mockResolvedValue({ count: 1 });
+    db.inventory.updateMany.mockImplementation(
+      async ({ data }: StockUpdate) => {
+        for (const key of Object.keys(data) as Array<keyof StockValues>)
+          stock[key] +=
+            (data[key]?.increment ?? 0) - (data[key]?.decrement ?? 0);
+        return { count: 1 };
+      },
+    );
+    db.inventory.findUniqueOrThrow.mockImplementation(async () => ({
+      ...stock,
+      product: {
+        card: { name: 'Pikachu', number: '025', set: { name: 'Base' } },
+        category: { name: 'Singles' },
+        condition: { name: 'Near Mint' },
+        language: { name: 'Português' },
+      },
+    }));
+    db.inventoryMovement.create.mockImplementation(
+      async ({ data }: { data: unknown }) => {
+        committedMovements.push(data);
+        return { id: 'movement-1' };
+      },
+    );
     db.$transaction.mockImplementation(
-      (work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
-        work(db as unknown as Prisma.TransactionClient),
+      async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+        const previous = {
+          stock: { ...stock },
+          movements: committedMovements.length,
+        };
+        try {
+          return await work(db as unknown as Prisma.TransactionClient);
+        } catch (error) {
+          stock = previous.stock;
+          committedMovements.length = previous.movements;
+          throw error;
+        }
+      },
     );
     service = new OrderExpirationService(db as unknown as PrismaService);
   });
@@ -63,6 +112,23 @@ describe('Order reservation expiry', () => {
         availableQuantity: { increment: 3 },
       },
     });
+    expect(committedMovements).toHaveLength(1);
+    expect(committedMovements[0]).toMatchObject({
+      productId: 'product-1',
+      type: 'ORDER_EXPIRED',
+      orderId: 'order-1',
+      orderNumber: 42,
+      actorId: null,
+      availableBefore: 7,
+      reservedBefore: 3,
+      soldBefore: 4,
+      availableDelta: 3,
+      reservedDelta: -3,
+      soldDelta: 0,
+      availableAfter: 10,
+      reservedAfter: 0,
+      soldAfter: 4,
+    });
   });
   it('rechecks eligibility inside the transaction and skips changed orders', async () => {
     db.order.findFirst.mockResolvedValue(null);
@@ -72,6 +138,7 @@ describe('Order reservation expiry', () => {
       failed: 0,
     });
     expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
     expect(db.order.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -85,6 +152,7 @@ describe('Order reservation expiry', () => {
     db.order.updateMany.mockResolvedValue({ count: 0 });
     expect((await service.expireBatch(now)).expired).toBe(0);
     expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
   it('continues to later orders after an inconsistent reservation', async () => {
     db.order.findMany.mockResolvedValue([{ id: 'order-1' }, { id: 'order-2' }]);
@@ -95,6 +163,30 @@ describe('Order reservation expiry', () => {
       failed: 1,
     });
     expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+  it('rolls back stock and reports failure when movement recording fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger details'),
+    );
+    expect(await service.expireBatch(now)).toEqual({
+      examined: 1,
+      expired: 0,
+      failed: 1,
+    });
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 3,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+  });
+  it('does not record another expiration after the pending order has been cancelled', async () => {
+    await service.expireBatch(now);
+    db.order.findFirst.mockResolvedValue(null);
+    await service.expireBatch(now);
+    expect(committedMovements).toHaveLength(1);
+    expect(db.inventory.updateMany).toHaveBeenCalledOnce();
+    expect(db.inventoryMovement.create).toHaveBeenCalledOnce();
   });
   it('advances past a full batch of failures so other orders are not starved', async () => {
     db.order.findMany.mockResolvedValueOnce(

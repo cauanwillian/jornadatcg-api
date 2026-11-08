@@ -51,8 +51,8 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     checkSessionOrigin(req);
-    const result = await this.auth.login(body);
-    const token = await this.sessions.issue(result.user.id);
+    const { authVersion, ...result } = await this.auth.login(body);
+    const token = await this.sessions.issue(result.user.id, authVersion ?? 0);
     setRefreshCookie(res, token, this.sessions.maxAge);
     return result;
   }

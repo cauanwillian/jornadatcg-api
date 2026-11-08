@@ -1,21 +1,25 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
+import { runtimeConfig } from './runtime-config.js';
 
 async function bootstrap() {
+  const { port, origins } = runtimeConfig();
   const app = await NestFactory.create(AppModule);
-  const origins = (process.env.AUTH_ALLOWED_ORIGINS ?? '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
+  app.enableShutdownHooks();
   if (origins.length)
     app.enableCors({
       origin: origins,
       credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Idempotency-Key',
+      ],
     });
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(port);
 }
 
 void bootstrap();

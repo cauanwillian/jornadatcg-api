@@ -23,7 +23,19 @@ import {
 import type { CreateLabelInput } from './dto/shipping-label.dto.js';
 import type { AvailableItemsQuery } from './dto/available-items.dto.js';
 
-const labelDto = (row: ShipmentLabel) => ({
+const labelFields = {
+  id: true,
+  shipmentId: true,
+  provider: true,
+  remoteId: true,
+  status: true,
+  cost: true,
+  generatedAt: true,
+  createStartedAt: true,
+  checkoutStartedAt: true,
+  generateStartedAt: true,
+} satisfies Prisma.ShipmentLabelSelect;
+const labelDto = (row: Pick<ShipmentLabel, keyof typeof labelFields>) => ({
   id: row.id,
   shipmentId: row.shipmentId,
   provider: row.provider,
@@ -35,6 +47,105 @@ const labelDto = (row: ShipmentLabel) => ({
   checkoutStartedAt: row.checkoutStartedAt?.toISOString() ?? null,
   generateStartedAt: row.generateStartedAt?.toISOString() ?? null,
 });
+
+const adminDetailSelect = {
+  id: true,
+  userId: true,
+  status: true,
+  provider: true,
+  shippingMethod: true,
+  shippingCost: true,
+  packedAt: true,
+  shippingPaidAt: true,
+  trackingCode: true,
+  createdAt: true,
+  updatedAt: true,
+  shippedAt: true,
+  deliveredAt: true,
+  addressSnapshot: true,
+  selectedQuote: {
+    select: {
+      provider: true,
+      carrier: true,
+      serviceName: true,
+      serviceCode: true,
+      amount: true,
+      packageSnapshot: true,
+    },
+  },
+  label: { select: labelFields },
+  items: {
+    orderBy: { orderItemId: 'asc' },
+    select: {
+      quantity: true,
+      orderItem: {
+        select: {
+          cardName: true,
+          cardNumber: true,
+          setName: true,
+          conditionName: true,
+          languageName: true,
+          unitPrice: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ShipmentSelect;
+
+// Historical JSON can contain unrelated data. Return only the documented fields.
+function adminAddress(value: Prisma.JsonValue | null) {
+  if (!isRecord(value)) return null;
+  const keys = [
+    'addressId',
+    'recipientName',
+    'zipCode',
+    'street',
+    'number',
+    'neighborhood',
+    'city',
+    'state',
+  ] as const;
+  if (!keys.every((key) => typeof value[key] === 'string')) return null;
+  return {
+    addressId: value.addressId as string,
+    recipientName: value.recipientName as string,
+    zipCode: value.zipCode as string,
+    street: value.street as string,
+    number: value.number as string,
+    complement: typeof value.complement === 'string' ? value.complement : null,
+    neighborhood: value.neighborhood as string,
+    city: value.city as string,
+    state: value.state as string,
+  };
+}
+
+function adminPackage(value: Prisma.JsonValue) {
+  if (!isRecord(value) || (value.name !== 'Pequena' && value.name !== 'Média'))
+    return null;
+  const dimensions = ['height', 'width', 'length', 'weight'] as const;
+  if (
+    !dimensions.every(
+      (key) =>
+        typeof value[key] === 'number' &&
+        Number.isFinite(value[key]) &&
+        (value[key] as number) > 0,
+    ) ||
+    !['originZipCode', 'destinationZipCode', 'declaredValue'].every(
+      (key) => typeof value[key] === 'string',
+    )
+  )
+    return null;
+  return {
+    name: value.name as 'Pequena' | 'Média',
+    height: value.height as number,
+    width: value.width as number,
+    length: value.length as number,
+    weight: value.weight as number,
+    originZipCode: value.originZipCode as string,
+    destinationZipCode: value.destinationZipCode as string,
+    declaredValue: value.declaredValue as string,
+  };
+}
 
 @Injectable()
 export class ShippingLabelsService {
@@ -81,6 +192,55 @@ export class ShippingLabelsService {
         }),
       })),
     );
+  }
+  detail(id: string) {
+    return this.protect(async () => {
+      const row = await this.prisma.shipment.findUnique({
+        where: { id },
+        select: adminDetailSelect,
+      });
+      if (!row) throw new NotFoundException('Envio não encontrado.');
+      return {
+        id: row.id,
+        userId: row.userId,
+        status: row.status,
+        provider: row.provider,
+        shippingCost:
+          row.shippingMethod === 'TO_BE_DEFINED'
+            ? null
+            : row.shippingCost.toFixed(2),
+        packedAt: row.packedAt?.toISOString() ?? null,
+        shippingPaidAt: row.shippingPaidAt?.toISOString() ?? null,
+        trackingCode: row.trackingCode,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        shippedAt: row.shippedAt?.toISOString() ?? null,
+        deliveredAt: row.deliveredAt?.toISOString() ?? null,
+        address: adminAddress(row.addressSnapshot),
+        quote: row.selectedQuote
+          ? {
+              provider: row.selectedQuote.provider,
+              carrier: row.selectedQuote.carrier,
+              serviceName: row.selectedQuote.serviceName,
+              serviceCode: row.selectedQuote.serviceCode,
+              amount: row.selectedQuote.amount.toFixed(2),
+              package: adminPackage(row.selectedQuote.packageSnapshot),
+            }
+          : null,
+        label: row.label ? labelDto(row.label) : null,
+        items: row.items.map(({ quantity, orderItem }) => ({
+          quantity,
+          orderItem: {
+            cardName: orderItem.cardName,
+            cardNumber: orderItem.cardNumber,
+            setName: orderItem.setName,
+            conditionName: orderItem.conditionName,
+            languageName: orderItem.languageName,
+            unitPrice: orderItem.unitPrice.toFixed(2),
+          },
+        })),
+      };
+    });
   }
   pack(id: string, actorId: string) {
     return this.protect(() =>

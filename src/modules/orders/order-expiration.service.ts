@@ -37,6 +37,7 @@ export class OrderExpirationService {
               where: { ...where, id },
               select: {
                 id: true,
+                orderNumber: true,
                 items: { select: { productId: true, quantity: true } },
               },
             });
@@ -46,7 +47,11 @@ export class OrderExpirationService {
               data: { status: 'CANCELLED', cancelledAt: now },
             });
             if (changed.count !== 1) return false;
-            await moveReservedStock(tx, order.items, 'availableQuantity');
+            await moveReservedStock(tx, order.items, 'availableQuantity', {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              type: 'ORDER_EXPIRED',
+            });
             return true;
           },
           { isolationLevel: 'Serializable', maxWait: 5000, timeout: 15000 },

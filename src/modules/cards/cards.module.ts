@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { CardsController } from './cards.controller.js';
 import { CardsService } from './cards.service.js';
 import { SearchCardsQueryPipe } from './dto/search-cards.dto.js';
-import { ScrydexService } from './integrations/scrydex.service.js';
+import { TcggoService } from './integrations/tcggo.service.js';
 import { DatabaseModule } from '../../database/database.module.js';
 import { CardsCatalogService } from './cards-catalog.service.js';
 import { AuthModule } from '../auth/auth.module.js';
@@ -14,7 +14,7 @@ import { ListCardsQueryPipe } from './dto/list-cards.dto.js';
   controllers: [CardsController],
   providers: [
     CardsService,
-    ScrydexService,
+    TcggoService,
     SearchCardsQueryPipe,
     CardsCatalogService,
     ImportCardBodyPipe,

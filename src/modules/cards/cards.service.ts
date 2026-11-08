@@ -1,16 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ScrydexService } from './integrations/scrydex.service.js';
+import { TcggoService } from './integrations/tcggo.service.js';
 import type { SearchCardsDto } from './dto/search-cards.dto.js';
 import type { CardSearchResultDto } from './dto/card-search-result.dto.js';
 
 @Injectable()
 export class CardsService {
-  constructor(
-    @Inject(ScrydexService) private readonly scrydex: ScrydexService,
-  ) {}
+  constructor(@Inject(TcggoService) private readonly tcggo: TcggoService) {}
 
   async search(query: SearchCardsDto): Promise<CardSearchResultDto[]> {
-    const cards = await this.scrydex.search(query);
+    const cards = await this.tcggo.search(query);
     return cards
       .filter(
         (card) =>

@@ -52,13 +52,14 @@ export class AuthService {
     tokenType: 'Bearer';
     expiresIn: number;
     user: PublicUser;
+    authVersion: number;
   }> {
     this.tokens.assertConfigured();
     let user;
     try {
       user = await this.prisma.user.findUnique({
         where: { email: input.email },
-        select: { ...publicUserSelect, passwordHash: true },
+        select: { ...publicUserSelect, passwordHash: true, authVersion: true },
       });
     } catch (error) {
       this.databaseError(error);
@@ -70,7 +71,8 @@ export class AuthService {
     if (!user || !valid)
       throw new UnauthorizedException('Email ou senha inválidos.');
     return {
-      accessToken: await this.tokens.sign(user.id),
+      accessToken: await this.tokens.sign(user.id, user.authVersion ?? 0),
+      authVersion: user.authVersion ?? 0,
       tokenType: 'Bearer',
       expiresIn: this.tokens.expiresIn,
       user: {
@@ -82,14 +84,20 @@ export class AuthService {
     };
   }
 
-  async currentUser(id: string): Promise<PublicUser> {
+  async currentUser(id: string, authVersion = 0): Promise<PublicUser> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id },
-        select: publicUserSelect,
+        select: { ...publicUserSelect, authVersion: true },
       });
-      if (!user) throw new UnauthorizedException('Usuário não autenticado.');
-      return user;
+      if (!user || (user.authVersion ?? 0) !== authVersion)
+        throw new UnauthorizedException('Usuário não autenticado.');
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      };
     } catch (error) {
       this.databaseError(error);
     }

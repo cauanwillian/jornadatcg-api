@@ -1,0 +1,23 @@
+name: API checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Only used to load Prisma configuration during generation; no database connection.
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/ci
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:deploy
+      - run: npm run lint
+      - run: npm test -- --maxWorkers=4

@@ -81,6 +81,16 @@ const cancelled: OrderRecord = {
   status: 'CANCELLED',
   cancelledAt: cart.updatedAt,
 };
+type StockValues = {
+  availableQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+};
+type StockUpdate = {
+  data: Partial<
+    Record<keyof StockValues, { increment?: number; decrement?: number }>
+  >;
+};
 
 describe('Orders HTTP', () => {
   let app: INestApplication<App>;
@@ -96,10 +106,14 @@ describe('Orders HTTP', () => {
       create: vi.fn(),
       updateMany: vi.fn(),
     },
-    inventory: { updateMany: vi.fn() },
+    inventory: { updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
     payment: { findFirst: vi.fn() },
     $transaction: vi.fn(),
   };
+  let stock: StockValues;
+  let committedMovements: unknown[];
+  let committedOrders: number;
   const checkout = (idempotencyKey: string | null = key) => {
     const call = request(app.getHttpServer())
       .post('/orders')
@@ -127,6 +141,9 @@ describe('Orders HTTP', () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+    stock = { availableQuantity: 10, reservedQuantity: 10, soldQuantity: 4 };
+    committedMovements = [];
+    committedOrders = 0;
     vi.stubEnv('JWT_SECRET', secret);
     db.user.findUnique.mockResolvedValue({
       id: userId,
@@ -135,8 +152,21 @@ describe('Orders HTTP', () => {
       role: 'CUSTOMER',
     });
     db.$transaction.mockImplementation(
-      (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
-        callback(db as unknown as Prisma.TransactionClient),
+      async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+        const previous = {
+          stock: { ...stock },
+          movements: committedMovements.length,
+          orders: committedOrders,
+        };
+        try {
+          return await callback(db as unknown as Prisma.TransactionClient);
+        } catch (error) {
+          stock = previous.stock;
+          committedMovements.length = previous.movements;
+          committedOrders = previous.orders;
+          throw error;
+        }
+      },
     );
     db.cart.findUnique.mockResolvedValue(cart);
     db.cart.update.mockResolvedValue({ id: cartId });
@@ -145,9 +175,30 @@ describe('Orders HTTP', () => {
     db.order.findFirst.mockResolvedValue(order);
     db.order.findMany.mockResolvedValue([order]);
     db.order.count.mockResolvedValue(1);
-    db.order.create.mockResolvedValue(order);
+    db.order.create.mockImplementation(async () => {
+      committedOrders++;
+      return order;
+    });
     db.order.updateMany.mockResolvedValue({ count: 1 });
-    db.inventory.updateMany.mockResolvedValue({ count: 1 });
+    db.inventory.updateMany.mockImplementation(
+      async ({ data }: StockUpdate) => {
+        for (const key of Object.keys(data) as Array<keyof StockValues>) {
+          stock[key] +=
+            (data[key]?.increment ?? 0) - (data[key]?.decrement ?? 0);
+        }
+        return { count: 1 };
+      },
+    );
+    db.inventory.findUniqueOrThrow.mockImplementation(async () => ({
+      ...stock,
+      product,
+    }));
+    db.inventoryMovement.create.mockImplementation(
+      async ({ data }: { data: unknown }) => {
+        committedMovements.push(data);
+        return { id: key };
+      },
+    );
     db.payment.findFirst.mockResolvedValue(null);
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -214,6 +265,32 @@ describe('Orders HTTP', () => {
     });
     expect(data).not.toHaveProperty('shippingAddress');
     expect(db.cartItem.deleteMany).toHaveBeenCalledWith({ where: { cartId } });
+    expect(db.inventoryMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId,
+          type: 'ORDER_RESERVED',
+          orderId,
+          orderNumber: 42,
+          actorId: null,
+          availableBefore: 10,
+          reservedBefore: 10,
+          soldBefore: 4,
+          availableDelta: -3,
+          reservedDelta: 3,
+          soldDelta: 0,
+          availableAfter: 7,
+          reservedAfter: 13,
+          soldAfter: 4,
+          cardName: 'Pikachu',
+          cardNumber: '025',
+          setName: 'Base',
+        }),
+      }),
+    );
+    expect(db.order.create.mock.invocationCallOrder[0]).toBeLessThan(
+      db.inventoryMovement.create.mock.invocationCallOrder[0],
+    );
   });
 
   it.each([order, cancelled])(
@@ -231,6 +308,7 @@ describe('Orders HTTP', () => {
       expect(db.cart.findUnique).not.toHaveBeenCalled();
       expect(db.order.create).not.toHaveBeenCalled();
       expect(db.inventory.updateMany).not.toHaveBeenCalled();
+      expect(db.inventoryMovement.create).not.toHaveBeenCalled();
       expect(db.cartItem.deleteMany).not.toHaveBeenCalled();
     },
   );
@@ -436,12 +514,33 @@ describe('Orders HTTP', () => {
       },
     });
     expect(db.cart.update).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId,
+          type: 'ORDER_CANCELLED',
+          orderId,
+          orderNumber: 42,
+          actorId: null,
+          availableBefore: 10,
+          reservedBefore: 10,
+          soldBefore: 4,
+          availableDelta: 3,
+          reservedDelta: -3,
+          soldDelta: 0,
+          availableAfter: 13,
+          reservedAfter: 7,
+          soldAfter: 4,
+        }),
+      }),
+    );
   });
   it('does not release stock again when cancellation is repeated', async () => {
     db.order.findFirst.mockResolvedValue(cancelled);
     await cancel().expect(200);
     expect(db.order.updateMany).not.toHaveBeenCalled();
     expect(db.inventory.updateMany).not.toHaveBeenCalled();
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
   it.each(['PAID', 'PREPARING', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'])(
     'blocks cancellation of %s orders',
@@ -486,6 +585,53 @@ describe('Orders HTTP', () => {
         },
       }),
     );
+    expect(db.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    expect(committedMovements[0]).toMatchObject({
+      type: 'ORDER_CANCELLED',
+      availableDelta: 6,
+      reservedDelta: -6,
+    });
+  });
+  it('rolls back a reservation and its new order if movement recording fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger details'),
+    );
+    const response = await checkout()
+      .send({ expectedSubtotal: '0.30' })
+      .expect(503);
+    expect(response.text).not.toContain('private ledger');
+    expect(stock).toEqual({
+      availableQuantity: 10,
+      reservedQuantity: 10,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+    expect(committedOrders).toBe(0);
+    expect(db.cartItem.deleteMany).not.toHaveBeenCalled();
+  });
+  it('rolls back the released balance when recording cancellation fails', async () => {
+    db.inventoryMovement.create.mockRejectedValue(
+      new Error('private ledger details'),
+    );
+    await cancel().expect(503);
+    expect(stock).toEqual({
+      availableQuantity: 10,
+      reservedQuantity: 10,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toEqual([]);
+  });
+  it('retries a serialization failure during recording without committing duplicate reservations', async () => {
+    db.inventoryMovement.create.mockRejectedValueOnce({ code: 'P2034' });
+    await checkout().send({ expectedSubtotal: '0.30' }).expect(200);
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(stock).toEqual({
+      availableQuantity: 7,
+      reservedQuantity: 13,
+      soldQuantity: 4,
+    });
+    expect(committedMovements).toHaveLength(1);
+    expect(committedOrders).toBe(1);
   });
   it('rejects cancellation if a reserved product has been removed', async () => {
     db.order.findFirst.mockResolvedValue({

@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client.js';
+import { recordStockMovement } from '../inventory/record-stock-movement.js';
 
 const MAX_STOCK = 2147483647;
 
@@ -8,6 +9,11 @@ export async function moveReservedStock(
   tx: Prisma.TransactionClient,
   items: ReadonlyArray<{ productId: string | null; quantity: number }>,
   destination: 'availableQuantity' | 'soldQuantity',
+  context: {
+    orderId: string;
+    orderNumber: number;
+    type: 'ORDER_EXPIRED' | 'PAYMENT_CONFIRMED' | 'PAYMENT_RELEASED';
+  },
 ) {
   if (!items.length)
     throw new ConflictException('Pedido sem itens. Contate o suporte.');
@@ -45,5 +51,14 @@ export async function moveReservedStock(
       throw new ConflictException(
         'Não foi possível movimentar a reserva deste pedido. Contate o suporte.',
       );
+    await recordStockMovement(tx, {
+      productId,
+      ...context,
+      delta: {
+        availableQuantity: destination === 'availableQuantity' ? quantity : 0,
+        reservedQuantity: -quantity,
+        soldQuantity: destination === 'soldQuantity' ? quantity : 0,
+      },
+    });
   }
 }

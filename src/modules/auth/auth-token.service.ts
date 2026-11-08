@@ -26,9 +26,15 @@ export class AuthTokenService {
     this.secret();
   }
 
-  async sign(userId: string): Promise<string> {
+  async sign(userId: string, authVersion = 0): Promise<string> {
+    if (
+      !Number.isInteger(authVersion) ||
+      authVersion < 0 ||
+      authVersion > 2_147_483_647
+    )
+      throw new UnauthorizedException('Sessão inválida.');
     return this.jwt.signAsync(
-      {},
+      { ver: authVersion },
       {
         secret: this.secret(),
         algorithm: 'HS256',
@@ -41,6 +47,12 @@ export class AuthTokenService {
   }
 
   async verify(token: string): Promise<string> {
+    return (await this.verifyClaims(token)).userId;
+  }
+
+  async verifyClaims(
+    token: string,
+  ): Promise<{ userId: string; authVersion: number }> {
     const secret = this.secret();
     try {
       const payload = await this.jwt.verifyAsync<Record<string, unknown>>(
@@ -60,11 +72,19 @@ export class AuthTokenService {
         ) ||
         typeof payload.exp !== 'number' ||
         typeof payload.iat !== 'number' ||
-        payload.exp - payload.iat > this.expiresIn
+        payload.exp - payload.iat > this.expiresIn ||
+        (payload.ver !== undefined &&
+          (typeof payload.ver !== 'number' ||
+            !Number.isInteger(payload.ver) ||
+            payload.ver < 0 ||
+            payload.ver > 2_147_483_647))
       ) {
         throw new Error('Invalid claims');
       }
-      return payload.sub;
+      return {
+        userId: payload.sub,
+        authVersion: (payload.ver as number | undefined) ?? 0,
+      };
     } catch {
       throw new UnauthorizedException('Token inválido ou expirado.');
     }

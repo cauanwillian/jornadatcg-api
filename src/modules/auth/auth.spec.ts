@@ -42,12 +42,15 @@ describe('Authentication HTTP', () => {
   const db = {
     refreshToken: { create: vi.fn() },
     user: { create: vi.fn(), findUnique: vi.fn() },
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   };
   const passwords = { hash: vi.fn(), verify: vi.fn() };
 
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.stubEnv('JWT_SECRET', secret);
+    db.$transaction.mockImplementation((work) => work(db));
     db.user.create.mockResolvedValue(user);
     db.user.findUnique.mockResolvedValue({
       ...user,
@@ -130,7 +133,7 @@ describe('Authentication HTTP', () => {
       .expect(200);
     expect(db.user.findUnique).toHaveBeenCalledWith({
       where: { email: user.email },
-      select: { ...publicUserSelect, passwordHash: true },
+      select: { ...publicUserSelect, passwordHash: true, authVersion: true },
     });
     expect(response.body).toMatchObject({
       tokenType: 'Bearer',
@@ -150,6 +153,8 @@ describe('Authentication HTTP', () => {
     expect(payload.sub).toBe(user.id);
     expect(Number(payload.exp) - Number(payload.iat)).toBe(900);
     expect(payload).not.toHaveProperty('role');
+    expect(payload.ver).toBe(0);
+    expect(response.body).not.toHaveProperty('authVersion');
     expect(response.headers['cache-control']).toBe('no-store');
   });
 
@@ -194,8 +199,55 @@ describe('Authentication HTTP', () => {
     expect(response.body).toEqual(user);
     expect(db.user.findUnique).toHaveBeenCalledWith({
       where: { id: user.id },
-      select: publicUserSelect,
+      select: { ...publicUserSelect, authVersion: true },
     });
+  });
+
+  it('rejects old access tokens after password recovery and accepts the current version', async () => {
+    db.user.findUnique.mockResolvedValue({ ...user, authVersion: 1 });
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token({}, { ver: 0 })}`)
+      .expect(401);
+    const response = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token({}, { ver: 1 })}`)
+      .expect(200);
+    expect(response.body).toEqual(user);
+  });
+
+  it.each([-1, 1.5, '1', null, 2_147_483_648])(
+    'rejects malformed session version %j',
+    async (ver) => {
+      await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${token({}, { ver })}`)
+        .expect(401);
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+    },
+  );
+
+  it('issues a new credential version at login without exposing internal fields', async () => {
+    db.user.findUnique.mockResolvedValue({
+      ...user,
+      passwordHash: 'stored-hash',
+      authVersion: 3,
+    });
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: user.email, password: registration.password })
+      .expect(200);
+    const claims = jwt.verify<Record<string, unknown>>(
+      response.body.accessToken,
+      { secret },
+    );
+    expect(claims.ver).toBe(3);
+    expect(response.body.user).toEqual(user);
+    expect(response.body).not.toHaveProperty('authVersion');
   });
 
   it.each([undefined, 'Basic abc', 'Bearer invalid', 'Bearer token extra'])(

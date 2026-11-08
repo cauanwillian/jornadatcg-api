@@ -1,11 +1,21 @@
-import { Controller, Get, Header } from '@nestjs/common';
+import { Controller, Get, Header, Inject } from '@nestjs/common';
+import { ReadinessService } from './readiness.service.js';
 
 @Controller('health')
 export class HealthController {
+  constructor(
+    @Inject(ReadinessService) private readonly readiness: ReadinessService,
+  ) {}
   // Liveness only: database and external providers have independent availability.
   @Get()
   @Header('Cache-Control', 'no-store')
   getHealth() {
     return { status: 'ok' };
+  }
+
+  @Get('ready')
+  @Header('Cache-Control', 'no-store')
+  ready() {
+    return this.readiness.check();
   }
 }

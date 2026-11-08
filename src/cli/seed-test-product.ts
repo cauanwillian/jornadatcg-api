@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { PrismaService } from '../database/prisma.service.js';
+import { recordStockMovement } from '../modules/inventory/record-stock-movement.js';
 
 // Stable identity makes repeat executions safe, even after purchases consume stock.
 const productId = 'c70182cc-f671-480c-87f2-b4914659de22';
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
               create: { code: 'TEST-PT-BR', name: '[TESTE] Português' },
               select: { id: true },
             });
-            return tx.product.create({
+            const created = await tx.product.create({
               data: {
                 id: productId,
                 cardId: card.id,
@@ -111,6 +112,17 @@ async function main(): Promise<void> {
               },
               select,
             });
+            await recordStockMovement(tx, {
+              productId: created.id,
+              type: 'INITIAL_STOCK',
+              reason: 'Cadastro de teste local',
+              delta: {
+                availableQuantity: 5,
+                reservedQuantity: 0,
+                soldQuantity: 0,
+              },
+            });
+            return created;
           },
           { isolationLevel: 'Serializable', maxWait: 5000, timeout: 15000 },
         );

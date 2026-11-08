@@ -36,6 +36,11 @@ export class AdminShipmentsController {
   list(@Query(AvailableItemsPipe) query: AvailableItemsQuery) {
     return this.labels.list(query);
   }
+  @Get(':id')
+  @Header('Cache-Control', 'no-store')
+  detail(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.labels.detail(id);
+  }
   @Post(':id/pack')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
