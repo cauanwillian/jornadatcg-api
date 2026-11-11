@@ -10,7 +10,8 @@ mudanças de preço ou recursos exigem revisão. O domínio continua na Hostinge
 
 - API: uma instância Node.js 24, plano `0.5c-512mb`, região Virginia.
 - Site: arquivos estáticos do repositório web, sem serviço Node adicional.
-- Banco: Supabase separado para homologação, ainda não provisionado.
+- Banco: projeto Supabase `hikari-homolog`, criado em 10/11/2026 com cotação de
+  US$ 0/mês na organização escolhida. Conexão privada e migrations pendentes.
 - Site: `https://homolog.hikariimportados.com`.
 - API: `https://api-homolog.hikariimportados.com`.
 

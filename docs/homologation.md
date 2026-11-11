@@ -5,18 +5,20 @@
 Ainda não há URL publicada. O usuário aprovou Render com API paga de US$ 7/mês.
 Não foram alterados DNS, webhooks ou credenciais dos serviços nesta preparação.
 O usuário confirmou que possui apenas o domínio na Hostinger. A
-[configuração Render](render-homologation.md) está preparada; acesso à conta e
-banco isolado ainda estão pendentes. Nenhum serviço foi contratado ou criado.
+[configuração Render](render-homologation.md) está preparada; o acesso à conta
+Render ainda está pendente. O projeto Supabase isolado `hikari-homolog` foi criado
+na organização escolhida pelo usuário, com cotação de US$ 0/mês. A conexão privada
+e aplicação das migrations nesse projeto ainda estão pendentes.
 
-| Verificação                                 | Resultado local                                                        |
-| ------------------------------------------- | ---------------------------------------------------------------------- |
-| API: geração do Prisma Client, build e lint | Passaram                                                               |
-| API: testes automatizados                   | 1.187 testes em 43 arquivos passaram                                   |
-| Site: build e lint                          | Passaram                                                               |
-| Site: testes automatizados                  | 1.717 testes em 52 arquivos passaram                                   |
-| Asaas e Melhor Envio                        | Configurados como sandbox                                              |
-| Recuperação por e-mail via Brevo            | Recebimento, troca de senha e login confirmados pelo usuário           |
-| Banco Supabase                              | Projeto atual ativo; não há projeto separado de homologação confirmado |
+| Verificação                                 | Resultado local                                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| API: geração do Prisma Client, build e lint | Passaram                                                                          |
+| API: testes automatizados                   | 1.187 testes em 43 arquivos passaram                                              |
+| Site: build e lint                          | Passaram                                                                          |
+| Site: testes automatizados                  | 1.717 testes em 52 arquivos passaram                                              |
+| Asaas e Melhor Envio                        | Configurados como sandbox                                                         |
+| Recuperação por e-mail via Brevo            | Recebimento, troca de senha e login confirmados pelo usuário                      |
+| Banco Supabase                              | `hikari-homolog` criado e ativo, sem tabelas da aplicação; banco atual preservado |
 
 Os testes automatizados usam mocks para integrações externas. Eles não comprovam
 pagamento, cotação, emissão de etiqueta ou envio de e-mail no servidor publicado.
