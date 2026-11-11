@@ -22,6 +22,10 @@ services:
         value: 24.21.0
       - key: NODE_ENV
         value: production
+      - key: PGSSLMODE
+        value: verify-full
+      - key: NODE_EXTRA_CA_CERTS
+        value: ./certs/supabase-ca-2021.crt
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET

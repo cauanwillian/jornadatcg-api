@@ -25,6 +25,20 @@ O plano proposto tem 512 MB. Validar memória durante os testes de homologação
 essa escolha inicial não representa dimensionamento aprovado para produção.
 Auto-deploy está desabilitado até concluir a validação do ambiente.
 
+## TLS do PostgreSQL
+
+A CA pública baixada pelo administrador no painel Supabase está em
+`certs/supabase-ca-2021.crt`. O Blueprint configura `PGSSLMODE=verify-full` e
+`NODE_EXTRA_CA_CERTS=./certs/supabase-ca-2021.crt` para a API. A conexão do
+`DATABASE_URL` não deve conter opções que desativem ou enfraqueçam esse TLS.
+Essas variáveis são públicas, não senhas, e precisam entrar no ambiente do serviço
+antes de reativar/deployar a API com esta versão do repositório.
+
+O motor de migrations do Prisma tem configuração TLS própria. Para operações
+locais, usar a conexão privada de `.env.homologation`, passando ao processo Prisma
+`sslmode=require`, `sslaccept=strict` e `sslcert` com o caminho absoluto desta CA.
+Não imprimir a conexão nem salvar o caminho local no `DATABASE_URL` do Render.
+
 ## Antes de aplicar o Blueprint
 
 1. Confirmar o plano e seus custos. O site estático está sujeito às franquias de
