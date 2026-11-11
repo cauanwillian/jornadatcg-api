@@ -3,8 +3,9 @@
 Este guia descreve os requisitos de publicação; sua presença no repositório não
 significa que exista um ambiente publicado. O domínio `hikariimportados.com` foi
 autenticado na Brevo e a recuperação de senha foi validada no ambiente local.
-A publicação HTTPS e a emissão fiscal continuam pendentes. É possível testar a
-hospedagem com uma URL HTTPS temporária antes de conectar o domínio da loja.
+Os serviços de homologação estão publicados em URLs HTTPS temporárias do Render;
+DNS dos subdomínios e validação integrada ainda estão pendentes. A emissão fiscal
+continua adiada.
 
 O roteiro e o estado da homologação estão em [homologation.md](homologation.md).
 

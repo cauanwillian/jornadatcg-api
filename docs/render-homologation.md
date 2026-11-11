@@ -1,21 +1,23 @@
-# Proposta de homologação no Render
+# Homologação no Render
 
 O usuário aprovou em 10/11/2026 a API paga de US$ 7/mês no Render, sujeita a
-consumo adicional e impostos. A publicação ainda não foi aplicada. O arquivo
+consumo adicional e impostos. Os dois serviços foram criados e os builds estão
+publicados nas URLs temporárias registradas em [homologation.md](homologation.md).
+DNS e validação dos fluxos integrados ainda estão pendentes. O arquivo
 [`deploy/render-homologation.yaml`](../deploy/render-homologation.yaml) cria uma
 API paga e um site estático. Conferir que o painel apresenta o plano aprovado;
 mudanças de preço ou recursos exigem revisão. O domínio continua na Hostinger.
 
-## Recursos e endereços propostos
+## Recursos e endereços
 
 - API: uma instância Node.js 24, plano `0.5c-512mb`, região Virginia.
 - Site: arquivos estáticos do repositório web, sem serviço Node adicional.
 - Banco: projeto Supabase `hikari-homolog`, criado em 10/11/2026 com cotação de
-  US$ 0/mês na organização escolhida. Conexão privada e migrations pendentes.
+  US$ 0/mês na organização escolhida. Conexão validada e 12 migrations aplicadas.
 - Site: `https://homolog.hikariimportados.com`.
 - API: `https://api-homolog.hikariimportados.com`.
 
-Os endereços acima são planejados: ainda não têm DNS/serviços configurados.
+Os endereços acima foram cadastrados nos serviços, mas ainda não têm DNS configurado.
 Ambos usam HTTPS e o mesmo domínio principal para permitir o cookie Strict entre
 site e API. Nesta topologia, o cookie continua em `/auth` e não há proxy `/api`.
 Usar somente as URLs configuradas, evitando testar a sessão entre subdomínios
@@ -38,6 +40,12 @@ O motor de migrations do Prisma tem configuração TLS própria. Para operaçõe
 locais, usar a conexão privada de `.env.homologation`, passando ao processo Prisma
 `sslmode=require`, `sslaccept=strict` e `sslcert` com o caminho absoluto desta CA.
 Não imprimir a conexão nem salvar o caminho local no `DATABASE_URL` do Render.
+
+Após migrations, aplicar `deploy/supabase-backend-access.sql` somente ao banco
+revisado para este backend. O script habilita RLS nas tabelas públicas e remove
+acesso dos papéis anon/authenticated, sem criar políticas de acesso direto. Não
+modifica dados ou a modelagem Prisma. Ele foi aplicado ao banco de homologação;
+não foi executado contra o banco local existente.
 
 ## Antes de aplicar o Blueprint
 

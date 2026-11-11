@@ -2,23 +2,46 @@
 
 ## Estado em 10/11/2026
 
-Ainda não há URL publicada. O usuário aprovou Render com API paga de US$ 7/mês.
-Não foram alterados DNS, webhooks ou credenciais dos serviços nesta preparação.
-O usuário confirmou que possui apenas o domínio na Hostinger. A
-[configuração Render](render-homologation.md) está preparada; o acesso à conta
-Render ainda está pendente. O projeto Supabase isolado `hikari-homolog` foi criado
-na organização escolhida pelo usuário, com cotação de US$ 0/mês. A conexão privada
-e aplicação das migrations nesse projeto ainda estão pendentes.
+Os dois serviços estão publicados no Render, com API paga de US$ 7/mês aprovada
+pelo usuário e site estático. As URLs temporárias observadas no painel são:
 
-| Verificação                                 | Resultado local                                                                   |
-| ------------------------------------------- | --------------------------------------------------------------------------------- |
-| API: geração do Prisma Client, build e lint | Passaram                                                                          |
-| API: testes automatizados                   | 1.187 testes em 43 arquivos passaram                                              |
-| Site: build e lint                          | Passaram                                                                          |
-| Site: testes automatizados                  | 1.717 testes em 52 arquivos passaram                                              |
-| Asaas e Melhor Envio                        | Configurados como sandbox                                                         |
-| Recuperação por e-mail via Brevo            | Recebimento, troca de senha e login confirmados pelo usuário                      |
-| Banco Supabase                              | `hikari-homolog` criado e ativo, sem tabelas da aplicação; banco atual preservado |
+- Site: https://hikari-web-homolog.onrender.com
+- API: https://hikari-api-homolog.onrender.com
+
+O frontend está configurado para acessar `api-homolog.hikariimportados.com`.
+Portanto, a publicação dos arquivos em `onrender.com` ainda não libera o fluxo
+integrado do site. Os dois subdomínios foram cadastrados no Render, mas ainda não
+resolvem no DNS. O usuário informou que poderá adicionar os registros na Hostinger
+somente em 11/11/2026. Não alterar o CORS ou os cookies para contornar essa etapa.
+
+O Supabase isolado `hikari-homolog` foi criado na organização escolhida, com
+cotação de US$ 0/mês. Foram aplicadas as 12 migrations existentes pelo Prisma
+7.10, com API/workers de homologação suspensos. A API foi reativada na versão
+`e1a0a97` após sincronizar a configuração TLS do Blueprint. A conexão local
+validou certificado/hostname; uma CA incorreta foi rejeitada. As 26 tabelas públicas
+estão com RLS e sem acesso dos papéis anon/authenticated, conforme o script
+`deploy/supabase-backend-access.sql`. Acesso pelo backend proprietário continua
+funcionando. Os avisos INFO de RLS sem políticas são intencionais: não há acesso
+direto aos dados por esses papéis.
+
+Os checks públicos da API retornaram 200 para `/health`, `/health/ready`,
+`/catalog/products?limit=1`, `/catalog/featured` e `/catalog/filters`; `/auth/me`
+sem token retornou 401. O site temporário retornou 200 com título HIKARI e
+`X-Robots-Tag: noindex, nofollow`. O banco ainda tem zero usuários, produtos e
+pedidos. Contas e dados de teste do ambiente local não foram copiados.
+
+Faltam DNS/certificados dos subdomínios, cadastro de conta/administrador e dados de
+teste, configuração/verificação do webhook sandbox e os testes integrados abaixo.
+
+| Verificação                                 | Resultado local                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| API: geração do Prisma Client, build e lint | Passaram                                                            |
+| API: testes automatizados                   | 1.187 testes em 43 arquivos passaram                                |
+| Site: build e lint                          | Passaram                                                            |
+| Site: testes automatizados                  | 1.717 testes em 52 arquivos passaram                                |
+| Asaas e Melhor Envio                        | Configurados como sandbox                                           |
+| Recuperação por e-mail via Brevo            | Recebimento, troca de senha e login confirmados pelo usuário        |
+| Banco Supabase                              | 12 migrations aplicadas, nenhuma incompleta; banco atual preservado |
 
 Os testes automatizados usam mocks para integrações externas. Eles não comprovam
 pagamento, cotação, emissão de etiqueta ou envio de e-mail no servidor publicado.
