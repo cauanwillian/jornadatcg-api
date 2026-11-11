@@ -1,0 +1,111 @@
+# Proposed deployment. Applying this Blueprint creates a PAID API service.
+# Review the cost and prepare an isolated database before applying it.
+# This file is not at render.yaml to avoid enabling deployment by accident.
+services:
+  - type: web
+    runtime: node
+    name: hikari-api-homolog
+    repo: https://github.com/cauanwillian/jornadatcg-api
+    branch: main
+    region: virginia
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: 'off'
+    buildCommand: npm ci --include=dev && npm run build:deploy
+    startCommand: npm run start:prod
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 60
+    domains:
+      - api-homolog.hikariimportados.com
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AUTH_ALLOWED_ORIGINS
+        value: https://homolog.hikariimportados.com
+      - key: PASSWORD_RESET_URL
+        value: https://homolog.hikariimportados.com/
+      - key: TCGGO_RAPIDAPI_KEY
+        sync: false
+      - key: ORDER_RESERVATION_MINUTES
+        value: '30'
+      - key: ASAAS_ENVIRONMENT
+        value: sandbox
+      - key: ASAAS_API_KEY
+        sync: false
+      - key: ASAAS_WEBHOOK_TOKEN
+        generateValue: true
+      - key: MELHOR_ENVIO_ENVIRONMENT
+        value: sandbox
+      - key: MELHOR_ENVIO_TOKEN
+        sync: false
+      - key: SHIPPING_ORIGIN_ZIP_CODE
+        value: '78556858'
+      - key: SHIPPING_CONTACT_EMAIL
+        sync: false
+      - key: SHIPPING_SENDER_NAME
+        sync: false
+      - key: SHIPPING_SENDER_DOCUMENT
+        sync: false
+      - key: SHIPPING_SENDER_PHONE
+        sync: false
+      - key: SHIPPING_SENDER_EMAIL
+        sync: false
+      - key: SHIPPING_SENDER_STREET
+        sync: false
+      - key: SHIPPING_SENDER_NUMBER
+        sync: false
+      - key: SHIPPING_SENDER_COMPLEMENT
+        sync: false
+      - key: SHIPPING_SENDER_NEIGHBORHOOD
+        sync: false
+      - key: SHIPPING_SENDER_CITY
+        sync: false
+      - key: SHIPPING_SENDER_STATE
+        value: MT
+      - key: SHIPPING_LABEL_SYNC_ENABLED
+        value: 'true'
+      - key: SHIPPING_LABEL_SYNC_INTERVAL_SECONDS
+        value: '60'
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+  - type: web
+    runtime: static
+    name: hikari-web-homolog
+    repo: https://github.com/cauanwillian/jornadatcg-web
+    branch: main
+    autoDeployTrigger: 'off'
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist
+    domains:
+      - homolog.hikariimportados.com
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: VITE_API_BASE_URL
+        value: https://api-homolog.hikariimportados.com
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

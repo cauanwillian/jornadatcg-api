@@ -1694,4 +1694,7 @@ O bootstrap habilita hooks de encerramento para liberar workers e conexões.
 O guia [docs/deployment.md](deployment.md) descreve build, release, variáveis,
 cookies, topologia do frontend/API e validação em homologação. O workflow local
 .github/workflows/ci.yml verifica build, lint e testes com Node 24; não publica nem
-acessa o banco real. Configurações de domínio/e-mail e emissão fiscal ficam pendentes.
+acessa o banco real. Domínio autenticado na Brevo e recuperação por e-mail foram
+validados localmente; os links devem ser revalidados após a publicação. A emissão
+fiscal continua adiada. O roteiro de homologação está em
+[docs/homologation.md](homologation.md).

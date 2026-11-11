@@ -1,9 +1,12 @@
-# Preparação para publicar a JornadaTCG
+# Preparação para publicar a HIKARI IMPORTADOS
 
-Esta etapa prepara o código e os checks. Ela não cria hospedagens, publica o
-sistema, modifica DNS ou troca ambientes dos provedores. Domínio/e-mail e emissão
-fiscal continuam pendentes. É possível testar a hospedagem com uma URL HTTPS
-temporária antes de conectar `jornadatcg.com`.
+Este guia descreve os requisitos de publicação; sua presença no repositório não
+significa que exista um ambiente publicado. O domínio `hikariimportados.com` foi
+autenticado na Brevo e a recuperação de senha foi validada no ambiente local.
+A publicação HTTPS e a emissão fiscal continuam pendentes. É possível testar a
+hospedagem com uma URL HTTPS temporária antes de conectar o domínio da loja.
+
+O roteiro e o estado da homologação estão em [homologation.md](homologation.md).
 
 ## Topologia de frontend e API
 
@@ -128,5 +131,7 @@ confira explicitamente o ambiente sandbox e os valores antes de confirmar.
 Configure o webhook Asaas com a URL HTTPS pública correspondente à topologia
 (`/api/webhooks/asaas` com proxy) e um token próprio.
 
-Registrar como pendentes os testes que dependem de SMTP/domínio, API Pokémon ou
-emissão fiscal. Uma resposta 200 de saúde não substitui esse teste completo.
+Revalidar SMTP, links de recuperação e API Pokémon na hospedagem, mesmo que já
+tenham funcionado localmente. Registrar emissão fiscal como adiada e registrar
+separadamente qualquer integração não configurada. Uma resposta 200 de saúde não
+substitui esse teste completo.

@@ -157,7 +157,7 @@ export class AsaasService {
         value: Number(input.amount),
         dueDate,
         externalReference: input.reference,
-        description: input.description ?? 'Compra JornadaTCG',
+        description: input.description ?? 'Compra HIKARI IMPORTADOS',
         fine: { value: 0 },
         interest: { value: 0 },
       }),

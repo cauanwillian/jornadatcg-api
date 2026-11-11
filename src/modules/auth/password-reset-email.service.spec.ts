@@ -267,10 +267,10 @@ describe('PasswordResetEmailService delivery', () => {
     expect(smtp.sendMail).toHaveBeenCalledTimes(1);
     const message = smtp.sendMail.mock.calls[0]![0] as Record<string, unknown>;
     expect(message).toEqual({
-      from: { name: 'JornadaTCG', address: 'loja@example.com' },
+      from: { name: 'HIKARI IMPORTADOS', address: 'loja@example.com' },
       to: { name: '', address: recipient },
       envelope: { from: 'loja@example.com', to: [recipient] },
-      subject: 'Redefina sua senha na JornadaTCG',
+      subject: 'Redefina sua senha na HIKARI IMPORTADOS',
       text: expect.stringContaining(
         `https://shop.example.com/recover#reset-password=${token}`,
       ),

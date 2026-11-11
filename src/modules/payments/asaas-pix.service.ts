@@ -149,7 +149,7 @@ export class AsaasPixService {
             amount: payment.amount.toFixed(2),
             reference: payment.id,
             expiresAt: payment.expiresAt!,
-            ...(payment.shipmentId ? { description: 'Frete JornadaTCG' } : {}),
+            ...(payment.shipmentId ? { description: 'Frete HIKARI IMPORTADOS' } : {}),
           });
         } catch (error) {
           if (error instanceof AsaasRejectedRequest) {

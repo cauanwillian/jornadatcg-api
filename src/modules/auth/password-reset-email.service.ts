@@ -200,12 +200,12 @@ export class PasswordResetEmailService {
       const result: unknown = await Promise.race([
         Promise.resolve().then(() =>
           sender.sendMail({
-            from: { name: 'JornadaTCG', address: settings.from },
+            from: { name: 'HIKARI IMPORTADOS', address: settings.from },
             to: { name: '', address: to },
             envelope: { from: settings.from, to: [to] },
-            subject: 'Redefina sua senha na JornadaTCG',
+            subject: 'Redefina sua senha na HIKARI IMPORTADOS',
             text: [
-              'Recebemos uma solicitação para redefinir sua senha na JornadaTCG.',
+              'Recebemos uma solicitação para redefinir sua senha na HIKARI IMPORTADOS.',
               '',
               'Acesse o link abaixo para escolher uma nova senha. Ele é válido por 15 minutos e pode ser usado uma única vez.',
               '',

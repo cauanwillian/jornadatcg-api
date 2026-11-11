@@ -171,7 +171,7 @@ describe('Freight Pix HTTP and settlement', () => {
     expect(asaas.createPix.mock.calls[0][0]).toMatchObject({
       amount: '12.34',
       reference: paymentId,
-      description: 'Frete JornadaTCG',
+      description: 'Frete HIKARI IMPORTADOS',
     });
     expect(db.payment.create.mock.calls[0][0].data).not.toHaveProperty(
       'orderId',

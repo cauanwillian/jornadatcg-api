@@ -9,6 +9,7 @@
   "scripts": {
     "email:check": "node dist/cli/check-email.js",
     "admin:promote": "node dist/cli/promote-admin.js",
+    "admin:reset-password": "node dist/cli/reset-admin-password.js",
     "seed:test-product": "npm run build && node dist/cli/seed-test-product.js",
     "build": "nest build",
     "build:deploy": "npm run prisma:generate && npm run build",

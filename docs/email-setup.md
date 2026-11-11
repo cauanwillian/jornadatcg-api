@@ -80,3 +80,55 @@ válido. Tokens e senhas não devem ser usados em comandos ou impressos no termi
 
 O módulo fiscal fica adiado. Esta etapa não depende de conta fiscal ou da API de
 cartas, nem altera estoque ou pedidos.
+
+## Recuperação local de administrador sem depender do SMTP
+
+Na máquina de desenvolvimento que já possui acesso privado ao banco:
+
+```powershell
+npm run build
+npm run admin:reset-password -- --email usuario@exemplo.com
+```
+
+O comando requer um terminal interativo. A nova senha é digitada duas vezes, sem
+aparecer na tela nem no histórico do shell, e deve ter de 12 a 128 caracteres.
+Não passe senha por argumento, pipe, variável de ambiente ou chat. Ctrl+C cancela.
+Ele redefine somente uma conta ADMIN existente, mantém e-mail/nome/função, não
+cria contas, usa o mesmo hash da API e invalida sessões e links anteriores na mesma
+transação, compartilhando a trava de recuperação/login. Nenhuma senha padrão é
+criada. O comando bloqueia NODE_ENV=production e não cria uma rota HTTP de bypass.
+Ele é uma ferramenta local confiável para quem já administra o backend e o banco.
+
+Depois entre no site com a nova senha. Esse procedimento não valida entrega SMTP;
+o teste de recuperação por e-mail depende da configuração do provedor.
+
+## Domínio da HIKARI IMPORTADOS na Hostinger
+
+A marca pública passou a ser HIKARI IMPORTADOS e o domínio informado para a loja
+é hikariimportados.com. Os repositórios e identificadores internos continuam com
+os nomes técnicos existentes para manter compatibilidade.
+
+Na Brevo, adicione hikariimportados.com (sem http://, https:// ou www). Para
+configurar manualmente, copie os registros de autenticação exibidos para esse
+novo domínio. Na Hostinger, abra Domínios → Gerenciar hikariimportados.com →
+DNS/Nameservers e adicione os registros nas opções de DNS. Use exatamente os tipos,
+nomes e valores que a Brevo gerar; não reutilize registros do domínio anterior.
+Se já houver DMARC, revise a política existente em vez de criar um segundo TXT
+_dmarc. Volte à Brevo e execute a autenticação após a propagação.
+
+Guias oficiais:
+- https://www.hostinger.com/support/6940479-how-to-use-the-domains-section-in-hostinger-dashboard/
+- https://help.brevo.com/hc/en-us/articles/12163873383186-Authenticate-your-domain-with-Brevo-Brevo-code-DKIM-DMARC
+
+Depois de autenticar e autorizar o remetente, preencha SMTP_FROM com o endereço
+escolhido no novo domínio. A senha SMTP fica somente no .env. PASSWORD_RESET_URL,
+AUTH_ALLOWED_ORIGINS e a URL pública do frontend/API devem ser ajustados conforme
+os endereços HTTPS efetivamente publicados; a compra do domínio por si só não
+publica o site nem ativa a recuperação de senha.
+
+### Validação local em 10/11/2026
+
+O usuário confirmou o recebimento do link via Brevo, a alteração da senha e o
+login com a nova senha. Ao publicar a homologação, configure `PASSWORD_RESET_URL`
+para a URL HTTPS efetiva do site, reinicie a API e repita o fluxo nesse ambiente.
+O teste local não valida a conectividade SMTP da hospedagem.

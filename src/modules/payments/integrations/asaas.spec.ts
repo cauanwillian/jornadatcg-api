@@ -90,7 +90,7 @@ describe('Asaas HTTP adapter', () => {
       value: 10.5,
       dueDate: '2026-09-26',
       externalReference: 'ref-123',
-      description: 'Compra JornadaTCG',
+      description: 'Compra HIKARI IMPORTADOS',
       fine: { value: 0 },
       interest: { value: 0 },
     });
