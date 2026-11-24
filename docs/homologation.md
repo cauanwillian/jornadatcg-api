@@ -10,11 +10,11 @@ autoritativos aurora/nebula e ao DNS público do Google confirmaram:
 | `homolog.hikariimportados.com`     | `hikari-web-homolog.onrender.com` |
 | `api-homolog.hikariimportados.com` | `hikari-api-homolog.onrender.com` |
 
-O usuário confirmou a verificação do domínio do site no Render. O site já
-responde HTTP 200 com TLS válido em `https://homolog.hikariimportados.com`.
-A conexão TLS de `api-homolog.hikariimportados.com` ainda é recusada; foi
-solicitada a conferência de Settings → Custom Domains no serviço da API.
-Não considerar a captura de verificação do site como aprovação do domínio da API.
+O usuário confirmou a verificação dos dois domínios no Render. Após o período de
+emissão dos certificados, site e API responderam com TLS válido nos respectivos
+subdomínios. `/health/ready` e catálogo retornaram 200; `/auth/me` sem token, 401. O preflight de refresh retornou 204, com a origem exata do site e credenciais
+permitidas. O JS publicado aponta para o domínio correto da API; CSS e favicon
+também responderam 200.
 
 Foi preparado, pelo CLI existente, o produto `[TESTE] Pikachu fictício` somente no
 banco isolado de homologação: `c70182cc-f671-480c-87f2-b4914659de22`, R$ 10,00,
@@ -22,10 +22,31 @@ cinco unidades disponíveis, nenhuma reservada ou vendida. O CLI local usou
 `NODE_ENV=development`, sandbox e TLS verificado, com validação explícita do destino
 `hikari-homolog`; o ambiente do serviço Render permanece production.
 
-O endpoint temporário da API continua respondendo 200 em `/health/ready` e no
-catálogo, que devolve esse produto. Requisições com Origin do site de homologação
-recebem o CORS exato e `Access-Control-Allow-Credentials: true`. Os testes de
-login, sessão e carrinho pelo site ainda dependem do HTTPS do domínio da API.
+### Testes funcionais pela API
+
+Durante a emissão do certificado, o endpoint temporário da mesma API foi usado
+para testar uma conta CUSTOMER fictícia, com e-mail `example.invalid` e senha
+aleatória mantida apenas em memória. Não foi enviado e-mail nem criada cobrança.
+
+- Cadastro, login e perfil autenticado passaram.
+- O cookie de refresh tem HttpOnly, Secure, SameSite=Strict e Path=/auth.
+- Refresh rotacionou a sessão; logout limpou o cookie e impediu nova renovação.
+- Carrinho passou por inclusão, PUT repetido sem duplicação, alteração de
+  quantidade e remoção.
+- Checkout criou um pedido pendente; repetir a mesma chave reutilizou o pedido
+  sem reservar estoque novamente.
+- Cancelar o pedido e repetir o cancelamento devolveu exatamente uma unidade.
+  O estoque terminou com cinco disponíveis e nenhuma reserva desse pedido.
+- Origem não permitida não recebeu liberação CORS; refresh dessa origem retornou 403. Carrinho sem login retornou 401 e cadastro sem dados retornou 400.
+
+O pedido técnico `b5140781-2a9a-4bb5-98cd-1db4b12221e3` ficou CANCELLED.
+O relatório sem credenciais está em `.tmp/homologation-api-check-20261123.json`,
+ignorado pelo Git. Esses testes não comprovam o comportamento do navegador.
+
+Foi solicitado ao usuário cadastrar sua conta pelo site e informar somente o
+e-mail para a promoção administrativa. Permanecem pendentes a validação pelo
+navegador, recuperação de senha nesse ambiente, painel administrativo, webhook,
+pagamentos e frete/etiquetas sandbox.
 
 ## Estado em 10/11/2026
 

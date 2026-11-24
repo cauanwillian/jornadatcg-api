@@ -3,9 +3,9 @@
 Este guia descreve os requisitos de publicação; sua presença no repositório não
 significa que exista um ambiente publicado. O domínio `hikariimportados.com` foi
 autenticado na Brevo e a recuperação de senha foi validada no ambiente local.
-Os serviços de homologação estão publicados em URLs HTTPS temporárias do Render;
-DNS dos subdomínios e validação integrada ainda estão pendentes. A emissão fiscal
-continua adiada.
+Os serviços de homologação estão publicados no Render. DNS e HTTPS dos subdomínios
+foram validados em 23/11/2026; a validação integrada pelo navegador e os fluxos
+sandbox estão em andamento. A emissão fiscal continua adiada.
 
 O roteiro e o estado da homologação estão em [homologation.md](homologation.md).
 

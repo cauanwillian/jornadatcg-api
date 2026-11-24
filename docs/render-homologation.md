@@ -3,7 +3,9 @@
 O usuário aprovou em 10/11/2026 a API paga de US$ 7/mês no Render, sujeita a
 consumo adicional e impostos. Os dois serviços foram criados e os builds estão
 publicados nas URLs temporárias registradas em [homologation.md](homologation.md).
-DNS e validação dos fluxos integrados ainda estão pendentes. O arquivo
+DNS e HTTPS dos dois subdomínios foram validados em 23/11/2026. Testes funcionais
+pela API passaram; os fluxos pelo navegador e integrações sandbox ainda estão em
+validação. O arquivo
 [`deploy/render-homologation.yaml`](../deploy/render-homologation.yaml) cria uma
 API paga e um site estático. Conferir que o painel apresenta o plano aprovado;
 mudanças de preço ou recursos exigem revisão. O domínio continua na Hostinger.
@@ -17,7 +19,7 @@ mudanças de preço ou recursos exigem revisão. O domínio continua na Hostinge
 - Site: `https://homolog.hikariimportados.com`.
 - API: `https://api-homolog.hikariimportados.com`.
 
-Os endereços acima foram cadastrados nos serviços, mas ainda não têm DNS configurado.
+Os endereços acima estão cadastrados nos serviços, com DNS e HTTPS validados.
 Ambos usam HTTPS e o mesmo domínio principal para permitir o cookie Strict entre
 site e API. Nesta topologia, o cookie continua em `/auth` e não há proxy `/api`.
 Usar somente as URLs configuradas, evitando testar a sessão entre subdomínios
