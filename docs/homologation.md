@@ -43,10 +43,39 @@ O pedido técnico `b5140781-2a9a-4bb5-98cd-1db4b12221e3` ficou CANCELLED.
 O relatório sem credenciais está em `.tmp/homologation-api-check-20261123.json`,
 ignorado pelo Git. Esses testes não comprovam o comportamento do navegador.
 
-Foi solicitado ao usuário cadastrar sua conta pelo site e informar somente o
-e-mail para a promoção administrativa. Permanecem pendentes a validação pelo
-navegador, recuperação de senha nesse ambiente, painel administrativo, webhook,
-pagamentos e frete/etiquetas sandbox.
+A conta informada pelo usuário foi cadastrada no site e promovida pelo CLI local
+no banco isolado. A função ADMIN foi confirmada por consulta, e o usuário confirmou
+que as opções administrativas apareceram após atualizar o site. Isso valida o
+acesso inicial ao painel; as operações de gestão ainda precisam ser exercitadas.
+
+### Webhook e estimativa de frete
+
+A consulta autenticada ao Asaas sandbox encontrou somente o webhook antigo do
+túnel local, desativado e interrompido. Foi criado um novo webhook, sem alterar
+o antigo:
+
+- Nome: HIKARI Homologacao.
+- ID: `23325aa8-38a7-48cb-bddc-0d141cde1f29`.
+- URL: `https://api-homolog.hikariimportados.com/webhooks/asaas`.
+- Ativo, fila não interrompida, API v3, entrega SEQUENTIALLY.
+- Eventos: PAYMENT_CREATED, PAYMENT_UPDATED, PAYMENT_CONFIRMED, PAYMENT_RECEIVED,
+  PAYMENT_OVERDUE, PAYMENT_DELETED e PAYMENT_REFUNDED.
+
+O usuário copiou o token já existente no Render para o arquivo local privado.
+Um POST de diagnóstico sem pagamento confirmou que a API aceita esse token;
+sem token, o endpoint retornou 401. A listagem do Asaas confirmou os campos do
+webhook criado. Isso valida configuração/autenticação, ainda não a entrega de um
+evento real do provedor. O relatório sem segredos está em
+`.tmp/homologation-asaas-webhook-20261123.json`, ignorado pelo Git.
+
+A estimativa pública para uma unidade e CEP 78556296 retornou HTTP 200:
+SEDEX R$ 10,57/2 dias, .Package R$ 43,08/8 dias e .Com R$ 43,89/7 dias, todos no
+Melhor Envio sandbox. Superfrete e Frenet retornaram NOT_CONFIGURED.
+
+Foi solicitado ao usuário criar uma compra de uma unidade pelo site e gerar o
+Pix, para então simular a confirmação no Asaas sandbox. Permanecem pendentes
+confirmação/entrega do evento, atualização do pedido no navegador, recuperação
+de senha nesse ambiente, demais operações administrativas e frete/etiquetas.
 
 ## Estado em 10/11/2026
 
