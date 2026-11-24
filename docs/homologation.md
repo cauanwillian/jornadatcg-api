@@ -94,11 +94,36 @@ Os relatórios privados sem credenciais estão em
 `.tmp/homologation-pix-state-20261123.json` e
 `.tmp/homologation-webhook-idempotency-20261123.json`, ignorados pelo Git.
 
-A unidade comprada ainda não foi alocada a envio. Foi solicitado ao usuário
-conferir no navegador o pedido pago e a carta em Compras acumuladas e envios.
+O usuário confirmou pelo navegador o pedido pago e a carta disponível em Compras
+acumuladas e envios.
+
+### Solicitação de envio e Pix separado do frete
+
+O usuário criou a solicitação, selecionou SEDEX no Melhor Envio sandbox e enviou
+evidência do QR Code de frete de R$ 10,57. O envio é
+`8bb18946-c26d-4223-9cab-29eaa7f96e99`, ligado à única unidade do pedido #2.
+
+Antes da confirmação simulada, foram conferidos conta proprietária, pagamento
+exclusivo de frete (`orderId` nulo e `shipmentId` correspondente), cotação
+selecionada SEDEX sandbox, valores iguais a R$ 10,57, validade da cotação/Pix e
+vínculo externo no Asaas. A simulação retornou RECEIVED e a API registrou:
+
+- Frete PAID de R$ 10,57 e envio PREPARING com shippingPaidAt preenchido.
+- Compra original PAID de R$ 10,00, shippingAmount de R$ 0,00 e um pagamento pago.
+- Um único pagamento pago para o frete, separado do pagamento da compra.
+- Estoque preservado em quatro disponíveis, zero reservadas e uma vendida.
+- Uma única movimentação PAYMENT_CONFIRMED para a compra.
+- Uma unidade alocada ao envio, impedindo nova solicitação da mesma unidade.
+
+Dois reenvios sintéticos autenticados de PAYMENT_RECEIVED do frete retornaram
+200 e mantiveram os mesmos estados/saldos. Os relatórios locais, sem credenciais,
+estão em `.tmp/homologation-freight-confirmation-20261123.json` e
+`.tmp/homologation-freight-state-20261123.json`, ignorados pelo Git.
+
+Foi solicitado ao usuário confirmar no site o frete pago e o envio em preparação.
 Ainda falta comprovar a entrega original no log do provedor, além de testar
-recuperação de senha nesse ambiente, demais operações administrativas e
-frete/etiquetas.
+embalagem/etiquetas, postagem/entrega, recuperação de senha nesse ambiente e demais
+operações administrativas.
 
 ## Estado em 10/11/2026
 
