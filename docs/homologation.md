@@ -1,5 +1,32 @@
 # Homologação da HIKARI IMPORTADOS
 
+## Atualização em 23/11/2026
+
+O usuário adicionou os dois CNAMEs na Hostinger. As consultas aos servidores
+autoritativos aurora/nebula e ao DNS público do Google confirmaram:
+
+| Nome                               | Destino                           |
+| ---------------------------------- | --------------------------------- |
+| `homolog.hikariimportados.com`     | `hikari-web-homolog.onrender.com` |
+| `api-homolog.hikariimportados.com` | `hikari-api-homolog.onrender.com` |
+
+O usuário confirmou a verificação do domínio do site no Render. O site já
+responde HTTP 200 com TLS válido em `https://homolog.hikariimportados.com`.
+A conexão TLS de `api-homolog.hikariimportados.com` ainda é recusada; foi
+solicitada a conferência de Settings → Custom Domains no serviço da API.
+Não considerar a captura de verificação do site como aprovação do domínio da API.
+
+Foi preparado, pelo CLI existente, o produto `[TESTE] Pikachu fictício` somente no
+banco isolado de homologação: `c70182cc-f671-480c-87f2-b4914659de22`, R$ 10,00,
+cinco unidades disponíveis, nenhuma reservada ou vendida. O CLI local usou
+`NODE_ENV=development`, sandbox e TLS verificado, com validação explícita do destino
+`hikari-homolog`; o ambiente do serviço Render permanece production.
+
+O endpoint temporário da API continua respondendo 200 em `/health/ready` e no
+catálogo, que devolve esse produto. Requisições com Origin do site de homologação
+recebem o CORS exato e `Access-Control-Allow-Credentials: true`. Os testes de
+login, sessão e carrinho pelo site ainda dependem do HTTPS do domínio da API.
+
 ## Estado em 10/11/2026
 
 Os dois serviços estão publicados no Render, com API paga de US$ 7/mês aprovada
