@@ -72,10 +72,33 @@ A estimativa pública para uma unidade e CEP 78556296 retornou HTTP 200:
 SEDEX R$ 10,57/2 dias, .Package R$ 43,08/8 dias e .Com R$ 43,89/7 dias, todos no
 Melhor Envio sandbox. Superfrete e Frenet retornaram NOT_CONFIGURED.
 
-Foi solicitado ao usuário criar uma compra de uma unidade pelo site e gerar o
-Pix, para então simular a confirmação no Asaas sandbox. Permanecem pendentes
-confirmação/entrega do evento, atualização do pedido no navegador, recuperação
-de senha nesse ambiente, demais operações administrativas e frete/etiquetas.
+### Compra Pix sandbox pelo site
+
+O usuário criou o pedido #2 pelo site e confirmou a exibição do QR Code Pix.
+Antes da simulação, foram conferidos o banco isolado, a titularidade da conta
+informada, uma única cobrança pendente de R$ 10,00, uma unidade do produto
+fictício, ausência de expiração, provedor sandbox e vínculo da cobrança externa
+com o pagamento local. A simulação usou exclusivamente o endpoint sandbox do
+Asaas e retornou RECEIVED.
+
+O pedido `662eb8bc-c142-4949-9d77-033db932461f` e seu pagamento passaram a PAID,
+ambos com data de pagamento, antes de qualquer reenvio de diagnóstico. O estoque
+ficou com quatro disponíveis, zero reservadas e uma vendida. Há exatamente uma
+movimentação PAYMENT_CONFIRMED para esse pedido.
+
+Foram feitos dois reenvios autenticados de PAYMENT_RECEIVED para testar
+idempotência: ambos retornaram 200, sem alterar os saldos nem duplicar a
+movimentação. Esses reenvios foram sintéticos, não logs de entrega do Asaas.
+Os relatórios privados sem credenciais estão em
+`.tmp/homologation-pix-confirmation-20261123.json`,
+`.tmp/homologation-pix-state-20261123.json` e
+`.tmp/homologation-webhook-idempotency-20261123.json`, ignorados pelo Git.
+
+A unidade comprada ainda não foi alocada a envio. Foi solicitado ao usuário
+conferir no navegador o pedido pago e a carta em Compras acumuladas e envios.
+Ainda falta comprovar a entrega original no log do provedor, além de testar
+recuperação de senha nesse ambiente, demais operações administrativas e
+frete/etiquetas.
 
 ## Estado em 10/11/2026
 
