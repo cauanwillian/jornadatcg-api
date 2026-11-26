@@ -95,6 +95,10 @@ preserva zeros à esquerda quando fornecidos pelo provedor. Quando `card_number`
 contém um código como `044/185`, o backend extrai `044`; o total da coleção
 continua vindo de `episode.cards_printed_total`, inclusive em reimpressões.
 Campos opcionais ausentes são `null`.
+Textos opcionais vazios também são normalizados para `null`. Quando a TCGGO
+informa `cards_printed_total: 0` em uma coleção promocional, a pesquisa e a
+importação retornam/persistem `printedTotal: null`, sem inventar um total. O
+número da carta é preservado e a biblioteca omite o denominador nesses casos.
 Nenhum resultado retorna `[]` com HTTP 200. Falhas externas retornam mensagens
 sanitizadas: 502 para resposta inválida, 503 para indisponibilidade/limite de
 requisições/autenticação externa e 504 para timeout.

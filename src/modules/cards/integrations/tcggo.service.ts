@@ -71,7 +71,9 @@ function text(value: unknown): string {
   return value;
 }
 function optionalText(value: unknown): string | null {
-  return value == null ? null : text(value);
+  return value == null || (typeof value === 'string' && !value.trim())
+    ? null
+    : text(value);
 }
 function cardNumber(value: unknown): string {
   if (integer(value)) return String(value);
@@ -102,13 +104,15 @@ function date(value: unknown): string | null {
   return iso.replaceAll('-', '/');
 }
 function normalizeSet(value: unknown): PokemonImportCard['set'] {
-  if (!record(value) || !integer(value.cards_printed_total, 1)) invalid();
+  if (!record(value) || !integer(value.cards_printed_total)) invalid();
   if (value.cards_total != null && !integer(value.cards_total)) invalid();
   if (value.series != null && !record(value.series)) invalid();
   return {
     id: `tcggo_${numericId(value.id)}`,
     name: text(value.name),
-    printedTotal: value.cards_printed_total,
+    // Promotional collections can report zero instead of a printed denominator.
+    printedTotal:
+      value.cards_printed_total === 0 ? null : value.cards_printed_total,
     total: value.cards_total ?? null,
     series:
       value.series == null

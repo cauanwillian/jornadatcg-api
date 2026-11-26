@@ -1,5 +1,48 @@
 # Homologação da HIKARI IMPORTADOS
 
+## Atualização em 26/11/2026
+
+O usuário confirmou a recuperação de senha no ambiente publicado, incluindo a
+definição da nova senha e o acesso à conta.
+
+Ao testar a importação pelo painel, a busca por Pikachu retornou 502. A consulta
+direta à TCGGO respondeu 200: não se tratava de chave ausente. A busca continha
+coleções promocionais com `cards_printed_total: 0` e coleções com `code: ""`,
+antes rejeitadas pelo adapter. A correção normaliza esses metadados para `null`,
+preserva todos os resultados e permite o total não informado no parser do painel.
+
+O adapter corrigido foi exercitado com uma pesquisa completa ao provedor e
+retornou 247 cartas em aproximadamente 9,7 segundos. Também foram adicionadas
+regressões de busca, importação e leitura do contrato pelo frontend. Os payloads
+de diagnóstico permanecem em `.tmp/`, ignorado pelo Git. A validação no painel
+publicado depende da atualização da API e do site no Render; importação e criação
+do anúncio ainda não estão confirmadas em homologação.
+
+## Atualização em 24/11/2026
+
+O fluxo de envio foi concluído em homologação, exclusivamente no Melhor Envio
+sandbox, para a unidade do produto fictício comprada no pedido #2:
+
+- Conferência da embalagem registrada pelo painel.
+- Etiqueta criada e comprada por R$ 10,57, igual ao frete pago pelo cliente.
+- Geração confirmada por consulta ao provedor, com rastreio disponível.
+- Usuário abriu a prévia de impressão da etiqueta e da DACE pelo site.
+- Painel passou por Pronto para postagem, Postado e Entregue, conforme evidências
+  e confirmações do usuário.
+- Consulta ao banco isolado confirmou envio e etiqueta em DELIVERED, com datas
+  de postagem/entrega, geração da etiqueta e rastreio preenchidos.
+
+Durante a criação, a API rejeitou o formato de SHIPPING_SENDER_EMAIL no Render.
+Uma verificação no Shell exibindo somente OK/INVALIDO identificou esse campo;
+após a correção, a criação funcionou. Nenhum dado pessoal ou valor de credencial
+foi registrado neste documento. A geração não ficou disponível imediatamente;
+consultas ao provedor distinguiram a compra confirmada da geração concluída.
+
+A validação cobre emissão, abertura da prévia e acompanhamento simulado no
+sandbox; não houve postagem física nem teste de operação em produção. Permanecem
+pendentes a recuperação de senha no endereço publicado, as demais operações
+administrativas e a comprovação de entrega original de webhook no log do Asaas.
+
 ## Atualização em 23/11/2026
 
 O usuário adicionou os dois CNAMEs na Hostinger. As consultas aos servidores
@@ -120,10 +163,10 @@ Dois reenvios sintéticos autenticados de PAYMENT_RECEIVED do frete retornaram
 estão em `.tmp/homologation-freight-confirmation-20261123.json` e
 `.tmp/homologation-freight-state-20261123.json`, ignorados pelo Git.
 
-Foi solicitado ao usuário confirmar no site o frete pago e o envio em preparação.
-Ainda falta comprovar a entrega original no log do provedor, além de testar
-embalagem/etiquetas, postagem/entrega, recuperação de senha nesse ambiente e demais
-operações administrativas.
+As etapas de embalagem, etiqueta, postagem e entrega foram concluídas em
+24/11/2026, conforme o registro acima. Permanecem as pendências de recuperação de
+senha no ambiente publicado, demais operações administrativas e comprovação de
+entrega original do webhook no log do Asaas.
 
 ## Estado em 10/11/2026
 

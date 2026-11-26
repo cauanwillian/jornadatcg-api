@@ -5,7 +5,7 @@ export interface CardSearchResultDto {
   set: {
     externalId: string;
     name: string;
-    printedTotal: number;
+    printedTotal: number | null;
   };
   rarity: string | null;
   artist: string | null;

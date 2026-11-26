@@ -3,7 +3,7 @@ export interface PokemonCard {
   id: string;
   name: string;
   number: string;
-  set: { id: string; name: string; printedTotal: number };
+  set: { id: string; name: string; printedTotal: number | null };
   rarity?: string | null;
   artist?: string | null;
   images?: { small?: string | null; large?: string | null } | null;

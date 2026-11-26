@@ -217,6 +217,24 @@ describe('GET /cards/search', () => {
     });
   });
 
+  it('accepts a collection without a code and blank optional metadata', async () => {
+    fetchMock.mockResolvedValueOnce(
+      pageResponse([
+        {
+          ...card,
+          rarity: '',
+          image: ' ',
+          episode: { ...episode, code: '' },
+        },
+      ]),
+    );
+    const response = await search().expect(200);
+    expect(response.body[0]).toMatchObject({
+      rarity: null,
+      images: { small: null, large: null },
+    });
+  });
+
   it('consumes subsequent pages and shares one deadline', async () => {
     fetchMock
       .mockResolvedValueOnce(
@@ -239,6 +257,34 @@ describe('GET /cards/search', () => {
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(
       fetchMock.mock.calls[1][1]?.signal,
     );
+  });
+
+  it('keeps promotional cards with no printed denominator alongside regular results', async () => {
+    fetchMock.mockResolvedValueOnce(
+      pageResponse([
+        card,
+        {
+          ...card,
+          id: 33669,
+          card_number: 'MEP',
+          episode: {
+            ...episode,
+            id: 412,
+            cards_printed_total: 0,
+            cards_total: 0,
+          },
+        },
+      ]),
+    );
+    const response = await search().expect(200);
+    expect(response.body).toHaveLength(2);
+    expect(response.body[0].set.printedTotal).toBe(182);
+    expect(response.body[1]).toMatchObject({
+      externalId: 'tcggo_33669',
+      number: 'MEP',
+      set: { printedTotal: null },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('fetches an episode once when two cards omit their printed total', async () => {

@@ -209,6 +209,56 @@ describe('Cards local catalog HTTP', () => {
     );
   });
 
+  it('imports a promotional collection without inventing its printed total', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: {
+            ...source,
+            card_number: 'MEP',
+            episode: {
+              ...source.episode,
+              cards_printed_total: 0,
+              cards_total: 0,
+            },
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    await importRequest().send({ externalId }).expect(200);
+    expect(tx.cardSet.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ printedTotal: null, total: 0 }),
+      }),
+    );
+    expect(tx.card.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ number: 'MEP' }),
+      }),
+    );
+  });
+
+  it('imports a collection with an empty optional code as null', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: {
+            ...source,
+            episode: { ...source.episode, code: '' },
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    await importRequest().send({ externalId }).expect(200);
+    expect(tx.cardSet.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ code: null }),
+      }),
+    );
+  });
+
   it('returns a stored card without consulting the provider or starting a transaction', async () => {
     database.card.findUnique.mockResolvedValue(local);
     await importRequest().send({ externalId }).expect(200);
