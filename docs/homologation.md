@@ -14,9 +14,16 @@ preserva todos os resultados e permite o total não informado no parser do paine
 O adapter corrigido foi exercitado com uma pesquisa completa ao provedor e
 retornou 247 cartas em aproximadamente 9,7 segundos. Também foram adicionadas
 regressões de busca, importação e leitura do contrato pelo frontend. Os payloads
-de diagnóstico permanecem em `.tmp/`, ignorado pelo Git. A validação no painel
-publicado depende da atualização da API e do site no Render; importação e criação
-do anúncio ainda não estão confirmadas em homologação.
+de diagnóstico permanecem em `.tmp/`, ignorado pelo Git.
+
+Após o usuário autenticar no Render, os deploys manuais foram concluídos com
+status Live: API `61f00c5` e frontend `b33619f`. Na API publicada,
+`/health/ready` retornou 200 e `/cards/search?name=Pikachu` retornou 200 com
+247 cartas, seis delas com total da coleção não informado, em aproximadamente
+8,2 segundos. O site e seu novo bundle `/assets/index-BG_VTXBq.js` retornaram 200;
+o JS referencia a origem correta da API de homologação. O catálogo também foi
+conferido no navegador. A pesquisa autenticada pelo painel, a importação e a
+criação do anúncio ainda precisam ser confirmadas pelo usuário em homologação.
 
 ## Atualização em 24/11/2026
 
